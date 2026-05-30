@@ -1,13 +1,15 @@
 """
-Crawler for 行政院人事行政總處事求人機關徵才系統
-Target: https://web3.dgpa.gov.tw/want03front/AP/WANTF00001.ASPX
-Site: ASP.NET WebForms — uses __VIEWSTATE postback (no __EVENTVALIDATION).
+行政院人事行政總處事求人機關徵才系統 爬蟲
+目標：https://web3.dgpa.gov.tw/want03front/AP/WANTF00001.ASPX
+網站類型：ASP.NET WebForms，需攜帶 __VIEWSTATE 跨頁 POST（無 __EVENTVALIDATION）。
+
+只抓列表頁資料（職稱、機關、地點、截止日、連結），不抓詳細頁，以加快即時回應。
 """
 import re
 import time
 from datetime import datetime, timezone, timedelta
 from typing import List
-from urllib.parse import urljoin, unquote
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -27,21 +29,23 @@ HEADERS = {
 }
 
 
+# ── 日期工具 ──────────────────────────────────────────────────────────────────
+
 def _roc_today() -> str:
-    """Return ROC date string: YYYMMDD (e.g. 1150526)."""
-    today = datetime.now(timezone(timedelta(hours=8)))  # Taipei time
-    roc_year = today.year - 1911
-    return f"{roc_year}{today.month:02d}{today.day:02d}"
+    """回傳今日民國年日期，格式 YYYMMDD（例：1150526）。"""
+    today = datetime.now(timezone(timedelta(hours=8)))
+    return f"{today.year - 1911}{today.month:02d}{today.day:02d}"
 
 
 def _roc_days_ago(days: int) -> str:
     d = datetime.now(timezone(timedelta(hours=8))) - timedelta(days=days)
-    roc_year = d.year - 1911
-    return f"{roc_year}{d.month:02d}{d.day:02d}"
+    return f"{d.year - 1911}{d.month:02d}{d.day:02d}"
 
+
+# ── ASP.NET Form 工具 ─────────────────────────────────────────────────────────
 
 def _extract_hidden_fields(soup: BeautifulSoup) -> dict:
-    """Collect all ASP.NET hidden inputs (VIEWSTATE, extra state fields)."""
+    """蒐集頁面中所有 ASP.NET 隱藏欄位（VIEWSTATE 等）。"""
     fields = {}
     for inp in soup.find_all("input", type="hidden"):
         name = inp.get("name")
@@ -50,29 +54,45 @@ def _extract_hidden_fields(soup: BeautifulSoup) -> dict:
     return fields
 
 
-def _search_payload(hidden: dict, date_from: str, date_to: str, event_target: str = "") -> dict:
-    """Build the POST payload for a search or pagination request."""
+def _search_payload(
+    hidden: dict,
+    date_from: str,
+    date_to: str,
+    work_place: str = "",
+    person_kind: str = "",
+    sysnam: str = "",
+    title_keyword: str = "",
+    org_keyword: str = "",
+    event_target: str = "",
+) -> dict:
+    """建立查詢或分頁 POST 的 payload。"""
     return {
         **hidden,
-        "__EVENTTARGET": event_target,
+        "__EVENTTARGET":   event_target,
         "__EVENTARGUMENT": "",
-        "__LASTFOCUS": "",
-        "ctl00$ContentPlaceHolder1$drpPERSON_KIND": "",
-        "ctl00$ContentPlaceHolder1$drpWORK_PLACE": "",
-        "ctl00$ContentPlaceHolder1$drpSYSNAM_grp": "",
-        "ctl00$ContentPlaceHolder1$drpSYSNAM": "",
+        "__LASTFOCUS":     "",
+        "ctl00$ContentPlaceHolder1$drpPERSON_KIND":        person_kind,
+        "ctl00$ContentPlaceHolder1$drpWORK_PLACE":         work_place,
+        "ctl00$ContentPlaceHolder1$drpSYSNAM_grp":         "",
+        "ctl00$ContentPlaceHolder1$drpSYSNAM":             sysnam,
         "ctl00$ContentPlaceHolder1$drpSPECIAL_CONDITIONS": "",
-        "ctl00$ContentPlaceHolder1$txtTITLE": "",
-        "ctl00$ContentPlaceHolder1$txbORG_NAME": "",
-        "ctl00$ContentPlaceHolder1$DATE_FROM": date_from,
-        "ctl00$ContentPlaceHolder1$DATE_TO": date_to,
-        # Only include the submit button on the first search, not on pagination
+        "ctl00$ContentPlaceHolder1$txtTITLE":              title_keyword,
+        "ctl00$ContentPlaceHolder1$txbORG_NAME":           org_keyword,
+        "ctl00$ContentPlaceHolder1$DATE_FROM":             date_from,
+        "ctl00$ContentPlaceHolder1$DATE_TO":               date_to,
+        # 第一次查詢才送出按鈕參數，分頁時不送
         **({"ctl00$ContentPlaceHolder1$btnQUERY": "查詢"} if not event_target else {}),
     }
 
 
+# ── 列表頁解析 ────────────────────────────────────────────────────────────────
+
+def _text(tag) -> str:
+    return tag.get_text(strip=True) if tag else ""
+
+
 def _parse_list_page(soup: BeautifulSoup) -> List[dict]:
-    """Extract job summary rows from the GridView."""
+    """從 GridView 解析職缺摘要列。"""
     table = soup.find("table", id="ctl00_ContentPlaceHolder1_gvMAIN")
     if not table:
         return []
@@ -83,40 +103,39 @@ def _parse_list_page(soup: BeautifulSoup) -> List[dict]:
         if not main_div:
             continue
 
-        # Title and agency are in clearly classed divs
-        title = _text(main_div.find("div", class_=lambda c: c and "md_block_bold" in c))
+        title  = _text(main_div.find("div", class_=lambda c: c and "md_block_bold" in c))
         agency = _text(main_div.find("div", class_=lambda c: c and "md_red" in c))
 
-        # Desktop-only hidden divs: rank_type, job_series, location, deadline (in order)
-        md_hides = [d for d in main_div.find_all("div")
-                    if "md_hide" in (d.get("class") or [])
-                    and "md_show" not in (d.get("class") or [])]
+        # 桌面版隱藏 div 依序：列等、職系、地點、截止日
+        md_hides = [
+            d for d in main_div.find_all("div")
+            if "md_hide" in (d.get("class") or [])
+            and "md_show" not in (d.get("class") or [])
+        ]
         rank_type  = _text(md_hides[0]) if len(md_hides) > 0 else ""
         job_series = _text(md_hides[1]) if len(md_hides) > 1 else ""
         location   = _text(md_hides[2]) if len(md_hides) > 2 else ""
         deadline   = _text(md_hides[3]) if len(md_hides) > 3 else ""
 
-        # Detail URL from onclick="window.open('WANTF00001_1.aspx?work_id=...', ...)"
         onclick = main_div.get("onclick", "")
         m = re.search(r"window\.open\('([^']+)'", onclick)
         detail_path = m.group(1) if m else ""
-        detail_url = urljoin(DETAIL_BASE, detail_path) if detail_path else ""
+        detail_url  = urljoin(DETAIL_BASE, detail_path) if detail_path else ""
 
-        # work_id becomes the job's unique ID
-        id_m = re.search(r"work_id=([^&]+)", detail_path)
+        id_m   = re.search(r"work_id=([^&]+)", detail_path)
         job_id = id_m.group(1) if id_m else detail_path
 
         if not title or not job_id:
             continue
 
         raw_jobs.append({
-            "job_id": job_id,
-            "title": title,
-            "agency": agency,
-            "location": location,
+            "job_id":     job_id,
+            "title":      title,
+            "agency":     agency,
+            "location":   location,
             "job_series": job_series,
-            "rank_type": rank_type,
-            "deadline": deadline.replace("有效期間：", "").strip(),
+            "rank_type":  rank_type,
+            "deadline":   deadline.replace("有效期間：", "").strip(),
             "detail_url": detail_url,
         })
 
@@ -124,66 +143,55 @@ def _parse_list_page(soup: BeautifulSoup) -> List[dict]:
 
 
 def _has_next_page(soup: BeautifulSoup) -> bool:
-    """Check if the '下一頁' link exists and is not disabled."""
     for a in soup.find_all("a", href=re.compile(r"doPostBack")):
         if "btnNEXT" in a.get("href", "") or "下一頁" in a.get_text():
             return True
     return False
 
 
-def _fetch_detail(session: requests.Session, url: str) -> dict:
-    """Fetch and parse a job detail page using known element IDs."""
-    if not url:
-        return {}
-    try:
-        r = session.get(url, headers=HEADERS, timeout=30)
-        r.raise_for_status()
-        r.encoding = "utf-8"
-        soup = BeautifulSoup(r.text, "lxml")
+# ── 主要爬取函式 ──────────────────────────────────────────────────────────────
 
-        def by_id(elem_id: str) -> str:
-            tag = soup.find(id=elem_id)
-            return tag.get_text(" ", strip=True) if tag else ""
+def crawl_jobs(
+    work_place: str = "",
+    person_kind: str = "",
+    sysnam: str = "",
+    title_keyword: str = "",
+    org_keyword: str = "",
+    lookback_days: int = 30,
+    max_pages: int = MAX_CRAWL_PAGES,
+) -> List[Job]:
+    """
+    依條件爬取職缺（只抓列表頁，不抓詳細頁，回應較快）。
 
-        date_range = by_id("PLDATE_FROM_TO")  # "115/05/26~115/05/28"
-        parts = date_range.split("~")
-        publish_date = parts[0].strip() if parts else ""
-        deadline = parts[-1].strip() if parts else ""
+    Args:
+        work_place:    drpWORK_PLACE 的值（空字串 = 全部地點）
+        person_kind:   drpPERSON_KIND 的值（空字串 = 全部類別）
+        sysnam:        drpSYSNAM 的值（空字串 = 全部職系）
+        title_keyword: 職缺名稱關鍵字（txtTITLE）
+        org_keyword:   機關名稱關鍵字（txbORG_NAME）
+        lookback_days: 查詢幾天內的職缺（預設 30 天）
+        max_pages:     最多爬幾頁（0 = 不限）
+    """
+    session  = requests.Session()
+    date_to  = _roc_today()
+    date_from = _roc_days_ago(lookback_days)
+    logger.info(
+        f"爬蟲啟動 | 地點={work_place!r} 人員={person_kind!r} "
+        f"關鍵字={title_keyword!r} 機關={org_keyword!r}"
+    )
 
-        return {
-            "rank_type":    by_id("PLRANK"),
-            "job_series":   by_id("PLSYSNAM"),
-            "location":     by_id("PLWORK_PLACE_TYPE"),
-            "description":  by_id("PLWORK_ITEM"),
-            "requirement":  by_id("PLWORK_QUALITY"),
-            "contact":      by_id("PLCONTACT_METHOD"),
-            "apply_method": by_id("V_Work_Type"),
-            "publish_date": publish_date,
-            "deadline":     deadline,
-        }
-    except Exception as e:
-        logger.warning(f"Detail fetch failed {url}: {e}")
-        return {}
-
-
-def _text(tag) -> str:
-    return tag.get_text(strip=True) if tag else ""
-
-
-def crawl_all_jobs() -> List[Job]:
-    session = requests.Session()
-    date_to   = _roc_today()
-    date_from = _roc_days_ago(30)  # last 30 days of postings
-    logger.info(f"Crawling jobs from {date_from} to {date_to}")
-
-    # Step 1: GET initial page for VIEWSTATE
+    # Step 1：GET 初始頁取得 VIEWSTATE
     r = session.get(LIST_URL, headers=HEADERS, timeout=30)
     r.encoding = "utf-8"
     soup = BeautifulSoup(r.text, "lxml")
 
-    # Step 2: First POST — submit search
-    hidden = _extract_hidden_fields(soup)
-    payload = _search_payload(hidden, date_from, date_to)
+    # Step 2：第一次 POST 帶查詢條件
+    hidden  = _extract_hidden_fields(soup)
+    payload = _search_payload(
+        hidden, date_from, date_to,
+        work_place=work_place, person_kind=person_kind, sysnam=sysnam,
+        title_keyword=title_keyword, org_keyword=org_keyword,
+    )
     r = session.post(LIST_URL, data=payload, headers=HEADERS, timeout=30)
     r.encoding = "utf-8"
     result_soup = BeautifulSoup(r.text, "lxml")
@@ -192,47 +200,41 @@ def crawl_all_jobs() -> List[Job]:
     page = 1
 
     while True:
-        raw_jobs = _parse_list_page(result_soup)
-        if not raw_jobs:
-            logger.info(f"No jobs on page {page}, stopping")
+        raw = _parse_list_page(result_soup)
+        if not raw:
+            logger.info(f"第 {page} 頁無資料，停止")
             break
 
-        all_raw.extend(raw_jobs)
-        logger.info(f"Page {page}: {len(raw_jobs)} jobs (total so far: {len(all_raw)})")
+        all_raw.extend(raw)
+        logger.info(f"第 {page} 頁：{len(raw)} 筆（累計 {len(all_raw)} 筆）")
 
-        if MAX_CRAWL_PAGES and page >= MAX_CRAWL_PAGES:
-            logger.info(f"Reached MAX_CRAWL_PAGES={MAX_CRAWL_PAGES}")
+        if max_pages and page >= max_pages:
+            logger.info(f"已達 max_pages={max_pages}，停止")
             break
 
         if not _has_next_page(result_soup):
-            logger.info("No next page, done paginating")
             break
 
-        # Pagination: postback to btnNEXT, carry hidden state from current result page
-        hidden = _extract_hidden_fields(result_soup)
+        # 分頁：POST 帶 btnNEXT EVENTTARGET，並更新 VIEWSTATE
+        hidden  = _extract_hidden_fields(result_soup)
         payload = _search_payload(
             hidden, date_from, date_to,
+            work_place=work_place, person_kind=person_kind, sysnam=sysnam,
+            title_keyword=title_keyword, org_keyword=org_keyword,
             event_target="ctl00$ContentPlaceHolder1$btnNEXT",
         )
         r = session.post(LIST_URL, data=payload, headers=HEADERS, timeout=30)
         r.encoding = "utf-8"
         result_soup = BeautifulSoup(r.text, "lxml")
         page += 1
-        time.sleep(0.8)
+        time.sleep(0.5)
 
-    # Step 3: Fetch detail pages
-    jobs: List[Job] = []
-    for i, raw in enumerate(all_raw):
-        detail = _fetch_detail(session, raw.get("detail_url", ""))
-        raw.update(detail)
-
-        if i > 0 and i % 10 == 0:
-            time.sleep(0.5)
-
+    jobs = []
+    for raw in all_raw:
         try:
             jobs.append(Job(**{k: raw.get(k, "") for k in Job.model_fields}))
         except Exception as e:
-            logger.warning(f"Job model error (job_id={raw.get('job_id')}): {e}")
+            logger.warning(f"Job 建立失敗（job_id={raw.get('job_id')}）：{e}")
 
-    logger.info(f"Crawl complete: {len(jobs)} jobs")
+    logger.info(f"爬蟲完成：共 {len(jobs)} 筆")
     return jobs

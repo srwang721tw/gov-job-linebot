@@ -9,16 +9,13 @@ LINE_CHANNEL_SECRET: str = os.getenv("LINE_CHANNEL_SECRET", "")
 
 BASE_DIR = Path(__file__).parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
-SQLITE_PATH = str(DATA_DIR / "sqlite" / "jobs.db")
-CHROMA_PATH = str(DATA_DIR / "chroma")
+SQLITE_PATH = str(DATA_DIR / "sqlite" / "subscriptions.db")
 
 CRAWLER_BASE_URL = "https://web3.dgpa.gov.tw/want03front/AP"
 CRAWLER_LIST_PAGE = "/WANTF00001.ASPX"
 
-TOP_K_RESULTS = int(os.getenv("TOP_K_RESULTS", "3"))
-# Multilingual model — handles Traditional Chinese + mixed queries well
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2")
-CHROMA_COLLECTION = "jobs"
+# 每次查詢最多爬幾頁（15筆/頁）。建議 3~5，0 = 不限（僅供測試）
+MAX_CRAWL_PAGES = int(os.getenv("MAX_CRAWL_PAGES", "3"))
 
-# Limit pages per crawl run (15 jobs/page). 0 = unlimited.
-MAX_CRAWL_PAGES = int(os.getenv("MAX_CRAWL_PAGES", "0"))
+# 回傳給使用者的最大職缺數
+TOP_K_RESULTS = int(os.getenv("TOP_K_RESULTS", "5"))
