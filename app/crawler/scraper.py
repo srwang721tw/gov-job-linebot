@@ -149,6 +149,58 @@ def _has_next_page(soup: BeautifulSoup) -> bool:
     return False
 
 
+def fetch_job_detail(session: requests.Session, url: str) -> dict:
+    """
+    抓取職缺詳細頁並解析關鍵欄位。
+    已驗證的 element ID（2026-05）：
+        PLTITLE          職稱
+        PLORG_NAME       機關名稱
+        PLPERSON_KIND    人員區分
+        PLWORK_PLACE_TYPE 工作地點
+        PLDATE_FROM_TO   徵才期間
+        PLWORK_ITEM      工作說明
+        PLWORK_QUALITY   應徵條件
+        PLWORK_ADDRESS   工作地址
+        PLCONTACT_METHOD 聯絡方式
+        V_Work_Type      應徵方式
+    """
+    if not url:
+        return {}
+    try:
+        r = session.get(url, headers=HEADERS, timeout=30)
+        r.raise_for_status()
+        r.encoding = "utf-8"
+        soup = BeautifulSoup(r.text, "lxml")
+
+        def by_id(eid: str) -> str:
+            tag = soup.find(id=eid)
+            return tag.get_text(" ", strip=True) if tag else ""
+
+        date_range = by_id("PLDATE_FROM_TO")     # "115/05/30~115/06/03"
+        parts = date_range.split("~")
+        publish_date = parts[0].strip() if parts else ""
+        deadline     = parts[-1].strip() if parts else ""
+
+        return {
+            "title":        by_id("PLTITLE"),
+            "agency":       by_id("PLORG_NAME"),
+            "person_kind":  by_id("PLPERSON_KIND"),
+            "location":     by_id("PLWORK_PLACE_TYPE"),
+            "rank_type":    by_id("PLRANK"),
+            "job_series":   by_id("PLSYSNAM"),
+            "description":  by_id("PLWORK_ITEM"),
+            "requirement":  by_id("PLWORK_QUALITY"),
+            "work_address": by_id("PLWORK_ADDRESS"),
+            "contact":      by_id("PLCONTACT_METHOD"),
+            "apply_method": by_id("V_Work_Type"),
+            "publish_date": publish_date,
+            "deadline":     deadline,
+        }
+    except Exception as e:
+        logger.warning(f"詳細頁抓取失敗 {url}: {e}")
+        return {}
+
+
 # ── 主要爬取函式 ──────────────────────────────────────────────────────────────
 
 def crawl_jobs(

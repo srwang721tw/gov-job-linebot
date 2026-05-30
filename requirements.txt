@@ -6,3 +6,4 @@ lxml>=5.1.0
 line-bot-sdk>=3.11.0
 python-dotenv>=1.0.0
 loguru>=0.7.0
+psycopg2-binary>=2.9.0

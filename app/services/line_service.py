@@ -39,14 +39,21 @@ _SKIP     = "略過"
 # {user_id: {"step": str, "page": int, "options": list, "pending": dict}}
 _conv: dict[str, dict] = {}
 
-_HELP_TEXT = (
-    "📋 使用說明\n\n"
-    "• 傳任何訊息 → 查詢最新職缺\n"
-    "• 輸入「訂閱」→ 設定查詢條件\n"
-    "• 輸入「我的訂閱」→ 查看目前設定\n"
-    "• 輸入「刪除訂閱」→ 清除所有條件\n"
-    "• 輸入「說明」→ 顯示此說明"
-)
+_HELP_TEXT = "\n".join([
+    "📋 使用說明",
+    "",
+    "傳任何訊息",
+    "  → 查詢最新職缺",
+    "",
+    "「訂閱」",
+    "  → 設定地點／類別／關鍵字",
+    "",
+    "「我的訂閱」",
+    "  → 查看目前設定",
+    "",
+    "「刪除訂閱」",
+    "  → 清除所有條件",
+])
 
 _TRIGGERS_SUBSCRIBE  = {"訂閱", "設定條件", "設定訂閱", "訂閱設定", "重新訂閱"}
 _TRIGGERS_MY_SUB     = {"我的訂閱", "查看訂閱", "訂閱資訊", "目前條件"}
@@ -131,12 +138,15 @@ def _save_and_confirm(user_id: str, reply_token: str):
     save_subscription(sub)
     _conv.pop(user_id, None)
 
-    lines = ["✅ 訂閱條件已儲存！\n"]
-    lines.append(f"工作地點：{sub.work_place_name}")
-    lines.append(f"人員類別：{sub.person_kind_name}")
-    lines.append(f"關鍵字：{sub.title_keyword or '不限'}")
-    lines.append("\n直接傳訊息即可查詢最新符合條件的職缺。")
-    _reply(reply_token, TextMessage(text="\n".join(lines)))
+    _reply(reply_token, TextMessage(text="\n".join([
+        "✅ 訂閱設定完成！",
+        "",
+        f"📍 地點：{sub.work_place_name}",
+        f"👤 類別：{sub.person_kind_name}",
+        f"🔍 關鍵字：{sub.title_keyword or '不限'}",
+        "",
+        "傳任何訊息即可查詢最新職缺。",
+    ])))
 
 
 # ── 步驟處理器 ────────────────────────────────────────────────────────────────
@@ -216,14 +226,18 @@ def handle_message(event: MessageEvent) -> None:
         sub = get_subscription(user_id)
         if not sub:
             _reply(reply_token, TextMessage(
-                text="您尚未設定訂閱條件。\n輸入「訂閱」開始設定。"
+                text="尚未設定訂閱條件。\n\n輸入「訂閱」開始設定。"
             ))
         else:
-            lines = ["📋 您的訂閱設定：\n"]
-            lines.append(f"工作地點：{sub.work_place_name or '不限'}")
-            lines.append(f"人員類別：{sub.person_kind_name or '不限'}")
-            lines.append(f"關鍵字：{sub.title_keyword or '不限'}")
-            _reply(reply_token, TextMessage(text="\n".join(lines)))
+            _reply(reply_token, TextMessage(text="\n".join([
+                "📋 目前訂閱設定",
+                "",
+                f"📍 地點：{sub.work_place_name or '不限'}",
+                f"👤 類別：{sub.person_kind_name or '不限'}",
+                f"🔍 關鍵字：{sub.title_keyword or '不限'}",
+                "",
+                "輸入「訂閱」可重新設定。",
+            ])))
         return
 
     if text in _TRIGGERS_DEL_SUB:

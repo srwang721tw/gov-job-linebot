@@ -7,6 +7,9 @@ load_dotenv()
 LINE_CHANNEL_ACCESS_TOKEN: str = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_CHANNEL_SECRET: str = os.getenv("LINE_CHANNEL_SECRET", "")
 
+# 設定後使用 Neon PostgreSQL；未設定則 fallback 到本機 SQLite（本機開發用）
+DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+
 BASE_DIR = Path(__file__).parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 SQLITE_PATH = str(DATA_DIR / "sqlite" / "subscriptions.db")

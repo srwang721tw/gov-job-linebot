@@ -11,6 +11,8 @@ services:
         sync: false          # 在 Render Dashboard 手動填入
       - key: LINE_CHANNEL_SECRET
         sync: false          # 在 Render Dashboard 手動填入
+      - key: DATABASE_URL
+        sync: false          # Neon PostgreSQL 連線字串（postgresql://...?sslmode=require）
       - key: MAX_CRAWL_PAGES
         value: "3"           # 每次查詢最多 3 頁（約 45 筆）
       - key: TOP_K_RESULTS
