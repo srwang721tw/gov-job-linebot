@@ -10,6 +10,12 @@ LINE_CHANNEL_SECRET: str = os.getenv("LINE_CHANNEL_SECRET", "")
 # 設定後使用 Neon PostgreSQL；未設定則 fallback 到本機 SQLite（本機開發用）
 DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
+# Telegram Bot Token（從 @BotFather 取得）；未設定則停用 Telegram 功能
+TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+# Webhook URL（正式環境）；未設定則 Telegram 不接收訊息（本機開發用 ngrok）
+# Render 會自動提供 RENDER_EXTERNAL_URL，程式會自動組合 /telegram-webhook 路徑
+TELEGRAM_WEBHOOK_URL: str = os.getenv("TELEGRAM_WEBHOOK_URL", "")
+
 BASE_DIR = Path(__file__).parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 SQLITE_PATH = str(DATA_DIR / "sqlite" / "subscriptions.db")
