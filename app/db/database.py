@@ -275,8 +275,10 @@ def delete_subscription(platform: str, platform_user_id: str) -> None:
 
 def get_subscription_count() -> int:
     with get_conn() as conn:
-        row = _run(conn, "SELECT COUNT(*) FROM subscription").fetchone()
-    return list(row)[0] if row else 0
+        row = _run(conn, "SELECT COUNT(*) AS cnt FROM subscription").fetchone()
+    if not row:
+        return 0
+    return dict(row).get("cnt", 0)
 
 
 # ── 職缺 CRUD ──────────────────────────────────────────────────────────────────
@@ -393,8 +395,10 @@ def search_jobs(
 
 def get_jobs_count() -> int:
     with get_conn() as conn:
-        row = _run(conn, "SELECT COUNT(*) FROM jobs").fetchone()
-    return list(row)[0] if row else 0
+        row = _run(conn, "SELECT COUNT(*) AS cnt FROM jobs").fetchone()
+    if not row:
+        return 0
+    return dict(row).get("cnt", 0)
 
 
 def delete_expired_jobs() -> int:
