@@ -210,23 +210,23 @@ ON CONFLICT(job_id) DO UPDATE SET
     org_name         = EXCLUDED.org_name,
     work_place       = EXCLUDED.work_place,
     work_place_code  = EXCLUDED.work_place_code,
-    person_kind      = EXCLUDED.person_kind,
-    person_kind_code = EXCLUDED.person_kind_code,
     rank_type        = EXCLUDED.rank_type,
     job_series       = EXCLUDED.job_series,
     sysnam_grp       = EXCLUDED.sysnam_grp,
-    regular_slots    = EXCLUDED.regular_slots,
-    alternate_slots  = EXCLUDED.alternate_slots,
-    qualifications   = EXCLUDED.qualifications,
-    work_items       = EXCLUDED.work_items,
-    work_address     = EXCLUDED.work_address,
-    contact_method   = EXCLUDED.contact_method,
-    apply_method     = EXCLUDED.apply_method,
-    publish_date     = EXCLUDED.publish_date,
     deadline         = EXCLUDED.deadline,
     deadline_end_iso = EXCLUDED.deadline_end_iso,
     job_url          = EXCLUDED.job_url,
-    crawled_at       = EXCLUDED.crawled_at
+    crawled_at       = EXCLUDED.crawled_at,
+    person_kind      = CASE WHEN EXCLUDED.person_kind      != '' THEN EXCLUDED.person_kind      ELSE jobs.person_kind      END,
+    person_kind_code = CASE WHEN EXCLUDED.person_kind_code != '' THEN EXCLUDED.person_kind_code ELSE jobs.person_kind_code END,
+    qualifications   = CASE WHEN EXCLUDED.qualifications   != '' THEN EXCLUDED.qualifications   ELSE jobs.qualifications   END,
+    work_items       = CASE WHEN EXCLUDED.work_items       != '' THEN EXCLUDED.work_items       ELSE jobs.work_items       END,
+    work_address     = CASE WHEN EXCLUDED.work_address     != '' THEN EXCLUDED.work_address     ELSE jobs.work_address     END,
+    contact_method   = CASE WHEN EXCLUDED.contact_method   != '' THEN EXCLUDED.contact_method   ELSE jobs.contact_method   END,
+    apply_method     = CASE WHEN EXCLUDED.apply_method     != '' THEN EXCLUDED.apply_method     ELSE jobs.apply_method     END,
+    publish_date     = CASE WHEN EXCLUDED.publish_date     != '' THEN EXCLUDED.publish_date     ELSE jobs.publish_date     END,
+    regular_slots    = CASE WHEN EXCLUDED.regular_slots    != 0  THEN EXCLUDED.regular_slots    ELSE jobs.regular_slots    END,
+    alternate_slots  = CASE WHEN EXCLUDED.alternate_slots  != 0  THEN EXCLUDED.alternate_slots  ELSE jobs.alternate_slots  END
 """
 
 
@@ -413,8 +413,9 @@ def search_jobs(
     """
     依條件從 jobs 表搜尋有效職缺（deadline_end_iso >= 今日）。
 
-    sysnam_names：若 sysnam_grp 非空，呼叫方傳入對應的職系名稱清單，
-                  用 IN 子句過濾 job_series。
+    sysnam_grp：用 jobs.sysnam_grp 欄位比對。
+                選 'A' 時同時包含 sysnam_grp='' 的職缺（約僱/約聘等無正式職系），
+                選 'B' 時只抓技術類，不包含無職系。
     """
     from datetime import date
     today = date.today().isoformat()
@@ -430,10 +431,11 @@ def search_jobs(
         where.append("person_kind_code = ?")
         params.append(person_kind_code)
 
-    if sysnam_names:
-        placeholders = ",".join(["?" for _ in sysnam_names])
-        where.append(f"job_series IN ({placeholders})")
-        params.extend(sysnam_names)
+    if sysnam_grp == "B":
+        where.append("sysnam_grp = 'B'")
+    elif sysnam_grp == "A":
+        # 行政類：包含明確標記為 A 的，以及無職系（約僱/約聘多屬行政性質）
+        where.append("(sysnam_grp = 'A' OR sysnam_grp = '')")
 
     if title_keyword:
         where.append("title LIKE ?")

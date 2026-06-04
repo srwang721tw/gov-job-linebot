@@ -9,7 +9,6 @@
 
 訊息格式以手機版 LINE / Telegram 顯示為準（短行、適當換行）。
 """
-from app.crawler.form_options import get_sysnam_names_for_grp
 from app.crawler.scraper import crawl_jobs
 from app.db.database import get_jobs_count, get_subscription, search_jobs
 from app.models.job import Job
@@ -96,9 +95,6 @@ def handle_user_query(platform: str, platform_user_id: str) -> str:
         f"關鍵字={sub.title_keyword!r}"
     )
 
-    # 職系名稱清單（for sysnam_grp filter）
-    sysnam_names = get_sysnam_names_for_grp(sub.sysnam_grp) if sub.sysnam_grp else None
-
     jobs: list[Job] = []
 
     # 先嘗試從 DB 搜尋
@@ -109,8 +105,7 @@ def handle_user_query(platform: str, platform_user_id: str) -> str:
             sysnam_grp       = sub.sysnam_grp,
             title_keyword    = sub.title_keyword,
             org_keyword      = sub.org_keyword,
-            sysnam_names     = sysnam_names,
-            limit            = TOP_K_RESULTS * 3,   # 多抓一點，可能有格式問題
+            limit            = TOP_K_RESULTS * 3,
         )
     except Exception as e:
         logger.error(f"DB 搜尋錯誤：{e}")
