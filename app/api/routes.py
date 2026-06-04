@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse
 from linebot.v3.exceptions import InvalidSignatureError
 
-from app.db.database import get_subscription_count
+from app.db.database import get_jobs_count, get_subscription_count
 from app.services.line_service import handler
+from app.utils.config import CRAWL_SECRET
 from app.utils.logger import logger
 
 router = APIRouter()
@@ -11,7 +12,11 @@ router = APIRouter()
 
 @router.get("/health")
 async def health_check():
-    return {"status": "ok", "subscription_count": get_subscription_count()}
+    return {
+        "status": "ok",
+        "subscription_count": get_subscription_count(),
+        "jobs_count": get_jobs_count(),
+    }
 
 
 # ── LINE webhook ──────────────────────────────────────────────────────────────
@@ -47,3 +52,25 @@ async def telegram_webhook(request: Request):
     update = Update.de_json(data, tg.bot)
     await tg.process_update(update)
     return JSONResponse(content={"ok": True})
+
+
+# ── 管理用爬取觸發（cron-job.org 每日打一次）─────────────────────────────────
+
+@router.post("/admin/trigger-crawl")
+async def trigger_crawl(request: Request, background: BackgroundTasks):
+    """
+    觸發每日職缺爬取。
+    需在 Header 帶 X-Crawl-Secret: <CRAWL_SECRET>。
+    若未設定 CRAWL_SECRET 則拒絕（避免未設定時任何人都可觸發）。
+    """
+    if not CRAWL_SECRET:
+        raise HTTPException(status_code=403, detail="CRAWL_SECRET 未設定")
+
+    secret = request.headers.get("X-Crawl-Secret", "")
+    if secret != CRAWL_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid crawl secret")
+
+    from app.scheduler.crawl_scheduler import daily_crawl_task
+    background.add_task(daily_crawl_task)
+    logger.info("手動觸發爬取任務（/admin/trigger-crawl）")
+    return JSONResponse(content={"status": "triggered"})

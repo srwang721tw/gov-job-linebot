@@ -1,6 +1,8 @@
 """
-從 DGPA 職缺網站抓取並快取下拉選單選項（工作地點、人員區分）。
-供 LINE 訂閱設定的 Quick Reply 選單使用。
+從 DGPA 職缺網站抓取並快取下拉選單選項。
+供訂閱設定的 Quick Reply / InlineKeyboard 使用。
+
+快取：工作地點、人員區分、職系（sysnam）
 """
 import requests
 from bs4 import BeautifulSoup
@@ -16,6 +18,13 @@ HEADERS = {
 
 _cached: dict | None = None
 
+# 職系大分類（硬編碼，與 DGPA drpSYSNAM_grp 對應）
+SYSNAM_GRP_OPTIONS = [
+    {"value": "",  "text": "不限"},
+    {"value": "A", "text": "行政類"},
+    {"value": "B", "text": "技術類"},
+]
+
 
 def _extract_options(soup: BeautifulSoup, select_id: str) -> list[dict]:
     tag = soup.find("select", id=select_id)
@@ -30,7 +39,12 @@ def _extract_options(soup: BeautifulSoup, select_id: str) -> list[dict]:
 
 def get_form_options() -> dict:
     """
-    回傳 {work_place, person_kind} 選單選項。
+    回傳選單選項字典：
+      {
+        "work_place":  [{value, text}, ...],   # 工作地點
+        "person_kind": [{value, text}, ...],   # 人員區分
+        "sysnam":      [{value, text}, ...],   # 職系細項（A101=綜合行政, B101=電機工程, ...）
+      }
     首次呼叫時從 DGPA 網站抓取，之後使用快取。
     """
     global _cached
@@ -49,16 +63,54 @@ def get_form_options() -> dict:
             "person_kind": _extract_options(
                 soup, "ctl00_ContentPlaceHolder1_drpPERSON_KIND"
             ),
+            "sysnam": _extract_options(
+                soup, "ctl00_ContentPlaceHolder1_drpSYSNAM"
+            ),
         }
         logger.info(
             f"選單選項已載入：{len(_cached['work_place'])} 個地點、"
-            f"{len(_cached['person_kind'])} 個人員類別"
+            f"{len(_cached['person_kind'])} 個人員類別、"
+            f"{len(_cached['sysnam'])} 個職系"
         )
     except Exception as e:
         logger.error(f"無法取得選單選項：{e}")
-        _cached = {"work_place": [], "person_kind": []}
+        _cached = {"work_place": [], "person_kind": [], "sysnam": []}
 
     return _cached
+
+
+def get_sysnam_names_for_grp(grp: str) -> list[str]:
+    """
+    取得指定職系大分類下的所有職系名稱清單，供 DB search_jobs 的 IN 子句使用。
+
+    grp='A' → ['綜合行政', '社勞行政', '人事行政', ...]
+    grp='B' → ['電機工程', '土木工程', ...]
+    grp=''  → [] (不過濾)
+    """
+    if not grp:
+        return []
+    opts = get_form_options().get("sysnam", [])
+    return [o["text"] for o in opts if o["value"].startswith(grp)]
+
+
+def text_to_code(category: str, text: str) -> str:
+    """
+    依顯示文字反查代碼。
+    text_to_code('person_kind', '聘用人員') → '12'
+    """
+    for opt in get_form_options().get(category, []):
+        if opt["text"] == text:
+            return opt["value"]
+    return ""
+
+
+def code_to_sysnam_grp(sysnam_code: str) -> str:
+    """
+    職系代碼 → 大分類：'A101' → 'A', 'B102' → 'B', '0100' → ''
+    """
+    if sysnam_code and sysnam_code[0].isalpha():
+        return sysnam_code[0].upper()
+    return ""
 
 
 def clear_cache() -> None:

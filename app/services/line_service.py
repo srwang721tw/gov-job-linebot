@@ -1,8 +1,6 @@
 """
-LINE Messaging API v3 webhook 處理。
-包含：訂閱設定的多步驟對話流程（Quick Reply 選單）、查詢觸發。
-
-對話狀態用 in-memory dict 維護（server restart 後重置，可接受）。
+LINE Messaging API v3 webhook 處理（v3）。
+訂閱設定流程：工作地點 → 人員類別 → 職系大分類 → 職稱關鍵字（可略過）
 """
 from linebot.v3 import WebhookHandler
 from linebot.v3.messaging import (
@@ -17,7 +15,7 @@ from linebot.v3.messaging import (
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
-from app.crawler.form_options import get_form_options
+from app.crawler.form_options import SYSNAM_GRP_OPTIONS, get_form_options
 from app.db.database import delete_subscription, get_subscription, save_subscription
 from app.models.subscription import Subscription
 from app.services.query_service import handle_user_query
@@ -30,7 +28,7 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 # 每頁 Quick Reply 顯示幾個選項（LINE 上限 13，保留 2 個給翻頁按鈕）
 _PAGE_SIZE = 11
 
-# 翻頁用的特殊文字（使用者在 LINE 畫面上看到這些中文）
+# 翻頁用的特殊文字
 _NAV_NEXT = "下一頁▶"
 _NAV_PREV = "◀上一頁"
 _SKIP     = "略過"
@@ -46,7 +44,7 @@ _HELP_TEXT = "\n".join([
     "  → 查詢最新職缺",
     "",
     "「訂閱」",
-    "  → 設定地點／類別／關鍵字",
+    "  → 設定地點／類別／職系／關鍵字",
     "",
     "「我的訂閱」",
     "  → 查看目前設定",
@@ -95,6 +93,8 @@ def _make_quick_reply(options: list[dict], page: int) -> QuickReply:
 
 def _ask_location(user_id: str, reply_token: str, page: int = 0):
     opts = [{"value": "", "text": "不限地區"}] + get_form_options().get("work_place", [])
+    # 過濾掉分組標題（code 以 00 結尾）
+    opts = [o for o in opts if not o["value"].endswith("00")]
     _conv[user_id].update({"step": "setup_location", "page": page, "options": opts})
     _reply(reply_token, TextMessage(
         text="📍 請選擇工作地點：",
@@ -111,12 +111,21 @@ def _ask_person_kind(user_id: str, reply_token: str, page: int = 0):
     ))
 
 
+def _ask_sysnam_grp(user_id: str, reply_token: str):
+    opts = SYSNAM_GRP_OPTIONS  # 不限 / 行政類 / 技術類
+    _conv[user_id].update({"step": "setup_sysnam_grp", "page": 0, "options": opts})
+    _reply(reply_token, TextMessage(
+        text="🗂 請選擇職系大分類：",
+        quick_reply=_make_quick_reply(opts, 0),
+    ))
+
+
 def _ask_keyword(user_id: str, reply_token: str):
     _conv[user_id]["step"] = "setup_keyword"
     _reply(reply_token, TextMessage(
         text=(
             "🔍 請輸入職缺名稱關鍵字\n"
-            "（例如：新聞輿情、採購、資訊）\n\n"
+            "（例如：採購、資訊、行政）\n\n"
             "或點「略過」不限職缺類型："
         ),
         quick_reply=QuickReply(items=[
@@ -128,11 +137,14 @@ def _ask_keyword(user_id: str, reply_token: str):
 def _save_and_confirm(user_id: str, reply_token: str):
     pending = _conv.get(user_id, {}).get("pending", {})
     sub = Subscription(
-        line_user_id     = user_id,
+        platform         = "line",
+        platform_user_id = user_id,
         work_place_code  = pending.get("work_place_code", ""),
         work_place_name  = pending.get("work_place_name", "不限"),
         person_kind_code = pending.get("person_kind_code", ""),
         person_kind_name = pending.get("person_kind_name", "不限"),
+        sysnam_grp       = pending.get("sysnam_grp", ""),
+        sysnam_grp_name  = pending.get("sysnam_grp_name", "不限"),
         title_keyword    = pending.get("title_keyword", ""),
     )
     save_subscription(sub)
@@ -143,6 +155,7 @@ def _save_and_confirm(user_id: str, reply_token: str):
         "",
         f"📍 地點：{sub.work_place_name}",
         f"👤 類別：{sub.person_kind_name}",
+        f"🗂 職系：{sub.sysnam_grp_name}",
         f"🔍 關鍵字：{sub.title_keyword or '不限'}",
         "",
         "傳任何訊息即可查詢最新職缺。",
@@ -165,7 +178,7 @@ def _handle_location_step(user_id: str, text: str, reply_token: str):
 
     selected = next((o for o in options if o["text"] == text), None)
     if selected is None:
-        _ask_location(user_id, reply_token, page)  # 無效輸入 → 重新顯示
+        _ask_location(user_id, reply_token, page)
         return
 
     state.setdefault("pending", {}).update({
@@ -196,6 +209,20 @@ def _handle_person_kind_step(user_id: str, text: str, reply_token: str):
         "person_kind_code": selected["value"],
         "person_kind_name": selected["text"],
     })
+    _ask_sysnam_grp(user_id, reply_token)
+
+
+def _handle_sysnam_grp_step(user_id: str, text: str, reply_token: str):
+    options = SYSNAM_GRP_OPTIONS
+    selected = next((o for o in options if o["text"] == text), None)
+    if selected is None:
+        _ask_sysnam_grp(user_id, reply_token)
+        return
+
+    _conv[user_id].setdefault("pending", {}).update({
+        "sysnam_grp":      selected["value"],
+        "sysnam_grp_name": selected["text"],
+    })
     _ask_keyword(user_id, reply_token)
 
 
@@ -214,7 +241,7 @@ def handle_message(event: MessageEvent) -> None:
     reply_token = event.reply_token
     step        = _conv.get(user_id, {}).get("step", "idle")
 
-    logger.info(f"user={user_id[:8]} step={step!r} text={text[:50]!r}")
+    logger.info(f"LINE user={user_id[:8]} step={step!r} text={text[:50]!r}")
 
     # ── 全域指令（優先於對話狀態）────────────────────────────────────────────
     if text in _TRIGGERS_SUBSCRIBE:
@@ -223,7 +250,7 @@ def handle_message(event: MessageEvent) -> None:
         return
 
     if text in _TRIGGERS_MY_SUB:
-        sub = get_subscription(user_id)
+        sub = get_subscription("line", user_id)
         if not sub:
             _reply(reply_token, TextMessage(
                 text="尚未設定訂閱條件。\n\n輸入「訂閱」開始設定。"
@@ -234,6 +261,7 @@ def handle_message(event: MessageEvent) -> None:
                 "",
                 f"📍 地點：{sub.work_place_name or '不限'}",
                 f"👤 類別：{sub.person_kind_name or '不限'}",
+                f"🗂 職系：{sub.sysnam_grp_name or '不限'}",
                 f"🔍 關鍵字：{sub.title_keyword or '不限'}",
                 "",
                 "輸入「訂閱」可重新設定。",
@@ -241,7 +269,7 @@ def handle_message(event: MessageEvent) -> None:
         return
 
     if text in _TRIGGERS_DEL_SUB:
-        delete_subscription(user_id)
+        delete_subscription("line", user_id)
         _conv.pop(user_id, None)
         _reply(reply_token, TextMessage(
             text="✅ 已刪除訂閱設定。\n輸入「訂閱」可重新設定。"
@@ -261,10 +289,14 @@ def handle_message(event: MessageEvent) -> None:
         _handle_person_kind_step(user_id, text, reply_token)
         return
 
+    if step == "setup_sysnam_grp":
+        _handle_sysnam_grp_step(user_id, text, reply_token)
+        return
+
     if step == "setup_keyword":
         _handle_keyword_step(user_id, text, reply_token)
         return
 
     # ── 預設：以訂閱條件查詢 ──────────────────────────────────────────────────
-    result = handle_user_query(user_id)
+    result = handle_user_query("line", user_id)
     _reply(reply_token, TextMessage(text=result))

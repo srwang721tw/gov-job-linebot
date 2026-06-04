@@ -1,12 +1,9 @@
 """
-Telegram Bot 服務
+Telegram Bot 服務（v3）。
 與 LINE bot 共用 query_service、database、form_options 層。
 
-訂閱設定流程：InlineKeyboard 引導（地點 → 人員類別 → 關鍵字）
-查詢觸發：任何文字訊息 → handle_user_query（帶 tg_{user_id} 作為 DB key）
-
-Webhook 模式：FastAPI 接收 POST /telegram-webhook 並轉給 Application.process_update()
-本機開發：需 ngrok 等工具暴露本機 port，或直接在 Render 上測試
+訂閱設定流程：InlineKeyboard 引導（地點 → 人員類別 → 職系大分類 → 關鍵字）
+查詢觸發：任何文字訊息 → handle_user_query(platform='telegram', ...)
 """
 import re
 from typing import Optional
@@ -24,38 +21,33 @@ from telegram.ext import (
     filters,
 )
 
-from app.crawler.form_options import get_form_options
+from app.crawler.form_options import SYSNAM_GRP_OPTIONS, get_form_options
 from app.db.database import delete_subscription, get_subscription, save_subscription
 from app.models.subscription import Subscription
 from app.services.query_service import handle_user_query
 from app.utils.config import TELEGRAM_BOT_TOKEN
 from app.utils.logger import logger
 
-# ── 全域 Application 實例（由 main.py 初始化）────────────────────────────────
+# ── 全域 Application 實例 ─────────────────────────────────────────────────────
 _tg_app: Optional[Application] = None
 
-# ── 對話狀態（in-memory，restart 後重置）────────────────────────────────────
-# {telegram_user_id: {"step": str, "page": int, "options": list, "pending": dict}}
+# ── 對話狀態 ─────────────────────────────────────────────────────────────────
 _conv: dict[int, dict] = {}
 
 # Inline keyboard 每頁顯示幾個選項、每行幾個
-_PAGE_SIZE = 8
+_PAGE_SIZE    = 8
 _ITEMS_PER_ROW = 2
 
 # ── callback_data 前綴 ────────────────────────────────────────────────────────
-# LC:CODE  → 選擇地點（CODE = drpWORK_PLACE 值，"_" 代表空字串即不限）
+# LC:CODE  → 選擇地點
 # LP:N     → 地點翻頁到第 N 頁
 # PC:CODE  → 選擇人員類別
 # PP:N     → 人員類別翻頁
-# SKIP     → 略過關鍵字輸入
+# SC:GRP   → 選擇職系大分類（GRP: '_'=不限, 'A', 'B'）
+# SKIP     → 略過關鍵字
 
 
-# ── 工具函式 ─────────────────────────────────────────────────────────────────
-
-def _db_key(tg_user_id: int) -> str:
-    """Telegram user ID 轉 DB key，與 LINE user ID（U...）區分。"""
-    return f"tg_{tg_user_id}"
-
+# ── 工具函式 ──────────────────────────────────────────────────────────────────
 
 def _clean_name(name: str) -> str:
     """去除地點代碼前綴：'10-臺北市' → '臺北市'"""
@@ -64,11 +56,10 @@ def _clean_name(name: str) -> str:
 
 
 def _location_options() -> list[dict]:
-    """取工作地點選項，過濾掉分組標題（以 00 結尾的 code）。"""
     return [
         {"value": o["value"], "text": _clean_name(o["text"])}
         for o in get_form_options().get("work_place", [])
-        if not o["value"].endswith("00")
+        if not o["value"].endswith("00")  # 過濾分組標題
     ]
 
 
@@ -77,7 +68,6 @@ def _person_kind_options() -> list[dict]:
 
 
 def _encode_val(v: str) -> str:
-    """空字串 encode 為 '_' 以避免 callback_data 問題。"""
     return v if v else "_"
 
 
@@ -85,10 +75,14 @@ def _decode_val(v: str) -> str:
     return "" if v == "_" else v
 
 
-def _build_kb(options: list[dict], page: int, sel_prefix: str, page_prefix: str) -> InlineKeyboardMarkup:
-    """建立分頁 InlineKeyboard。"""
+def _build_kb(
+    options: list[dict],
+    page: int,
+    sel_prefix: str,
+    page_prefix: str,
+) -> InlineKeyboardMarkup:
     start = page * _PAGE_SIZE
-    end = min(start + _PAGE_SIZE, len(options))
+    end   = min(start + _PAGE_SIZE, len(options))
     chunk = options[start:end]
 
     rows = []
@@ -96,7 +90,7 @@ def _build_kb(options: list[dict], page: int, sel_prefix: str, page_prefix: str)
         rows.append([
             InlineKeyboardButton(
                 text=o["text"],
-                callback_data=f"{sel_prefix}:{_encode_val(o['value'])}"
+                callback_data=f"{sel_prefix}:{_encode_val(o['value'])}",
             )
             for o in chunk[i:i + _ITEMS_PER_ROW]
         ])
@@ -128,14 +122,26 @@ async def _ask_person_kind(user_id: int, chat_id: int, bot) -> None:
     await bot.send_message(chat_id=chat_id, text="👤 請選擇人員類別：", reply_markup=kb)
 
 
-async def _ask_keyword(user_id: int, chat_id: int, bot) -> None:
-    _conv[user_id]["step"] = "setup_keyword"
-    kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("略過", callback_data="SKIP")
-    ]])
+async def _ask_sysnam_grp(user_id: int, chat_id: int, bot) -> None:
+    opts = SYSNAM_GRP_OPTIONS  # 不限 / 行政類 / 技術類
+    _conv[user_id].update({"step": "setup_sysnam_grp", "page": 0, "options": opts})
+    rows = [[
+        InlineKeyboardButton(o["text"], callback_data=f"SC:{_encode_val(o['value'])}")
+        for o in opts
+    ]]
     await bot.send_message(
         chat_id=chat_id,
-        text="🔍 請輸入職缺名稱關鍵字\n（例如：採購、資訊、行政）\n\n或點「略過」不限職缺類型：",
+        text="🗂 請選擇職系大分類：",
+        reply_markup=InlineKeyboardMarkup(rows),
+    )
+
+
+async def _ask_keyword(user_id: int, chat_id: int, bot) -> None:
+    _conv[user_id]["step"] = "setup_keyword"
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("略過", callback_data="SKIP")]])
+    await bot.send_message(
+        chat_id=chat_id,
+        text="🔍 請輸入職缺名稱關鍵字\n（例如：採購、資訊、行政）\n\n或點「略過」不限：",
         reply_markup=kb,
     )
 
@@ -143,11 +149,14 @@ async def _ask_keyword(user_id: int, chat_id: int, bot) -> None:
 async def _save_and_confirm(user_id: int, keyword: str, chat_id: int, bot) -> None:
     pending = _conv.get(user_id, {}).get("pending", {})
     sub = Subscription(
-        line_user_id     = _db_key(user_id),
+        platform         = "telegram",
+        platform_user_id = str(user_id),
         work_place_code  = pending.get("work_place_code", ""),
         work_place_name  = pending.get("work_place_name", "不限"),
         person_kind_code = pending.get("person_kind_code", ""),
         person_kind_name = pending.get("person_kind_name", "不限"),
+        sysnam_grp       = pending.get("sysnam_grp", ""),
+        sysnam_grp_name  = pending.get("sysnam_grp_name", "不限"),
         title_keyword    = keyword,
     )
     save_subscription(sub)
@@ -158,6 +167,7 @@ async def _save_and_confirm(user_id: int, keyword: str, chat_id: int, bot) -> No
         "",
         f"📍 地點：{sub.work_place_name}",
         f"👤 類別：{sub.person_kind_name}",
+        f"🗂 職系：{sub.sysnam_grp_name}",
         f"🔍 關鍵字：{sub.title_keyword or '不限'}",
         "",
         "傳任何訊息即可查詢最新職缺。",
@@ -187,7 +197,7 @@ async def cmd_subscribe(update: Update, context) -> None:
 
 
 async def cmd_my_sub(update: Update, context) -> None:
-    sub = get_subscription(_db_key(update.effective_user.id))
+    sub = get_subscription("telegram", str(update.effective_user.id))
     if not sub:
         await update.message.reply_text("尚未設定訂閱條件。\n\n輸入 /subscribe 開始設定。")
     else:
@@ -196,6 +206,7 @@ async def cmd_my_sub(update: Update, context) -> None:
             "",
             f"📍 地點：{sub.work_place_name or '不限'}",
             f"👤 類別：{sub.person_kind_name or '不限'}",
+            f"🗂 職系：{sub.sysnam_grp_name or '不限'}",
             f"🔍 關鍵字：{sub.title_keyword or '不限'}",
             "",
             "輸入 /subscribe 可重新設定。",
@@ -204,7 +215,7 @@ async def cmd_my_sub(update: Update, context) -> None:
 
 async def cmd_del_sub(update: Update, context) -> None:
     user_id = update.effective_user.id
-    delete_subscription(_db_key(user_id))
+    delete_subscription("telegram", str(user_id))
     _conv.pop(user_id, None)
     await update.message.reply_text("✅ 已刪除訂閱設定。\n輸入 /subscribe 可重新設定。")
 
@@ -225,11 +236,11 @@ async def cmd_help(update: Update, context) -> None:
 
 async def handle_callback(update: Update, context) -> None:
     query = update.callback_query
-    await query.answer()  # 必須 acknowledge，否則 Telegram 會一直 loading
+    await query.answer()
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
-    data = query.data
-    step = _conv.get(user_id, {}).get("step", "idle")
+    data    = query.data
+    step    = _conv.get(user_id, {}).get("step", "idle")
 
     # ── 翻頁 ─────────────────────────────────────────────────────────────────
     if data.startswith("LP:") and step == "setup_location":
@@ -271,6 +282,18 @@ async def handle_callback(update: Update, context) -> None:
             "person_kind_name": name,
         })
         await query.edit_message_text(f"👤 類別：{name} ✓")
+        await _ask_sysnam_grp(user_id, chat_id, context.bot)
+        return
+
+    # ── 選擇職系大分類 ────────────────────────────────────────────────────────
+    if data.startswith("SC:") and step == "setup_sysnam_grp":
+        grp  = _decode_val(data[3:])
+        name = next((o["text"] for o in SYSNAM_GRP_OPTIONS if o["value"] == grp), "不限")
+        _conv[user_id]["pending"].update({
+            "sysnam_grp":      grp,
+            "sysnam_grp_name": name,
+        })
+        await query.edit_message_text(f"🗂 職系：{name} ✓")
         await _ask_keyword(user_id, chat_id, context.bot)
         return
 
@@ -286,8 +309,8 @@ async def handle_callback(update: Update, context) -> None:
 async def handle_message(update: Update, context) -> None:
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
-    text = update.message.text.strip()
-    step = _conv.get(user_id, {}).get("step", "idle")
+    text    = update.message.text.strip()
+    step    = _conv.get(user_id, {}).get("step", "idle")
 
     logger.info(f"Telegram user={user_id} step={step!r} text={text[:50]!r}")
 
@@ -311,7 +334,7 @@ async def handle_message(update: Update, context) -> None:
         return
 
     # 預設：以訂閱條件查詢
-    result = handle_user_query(_db_key(user_id))
+    result = handle_user_query("telegram", str(user_id))
     await update.message.reply_text(result)
 
 
@@ -321,18 +344,17 @@ def build_telegram_app() -> Application:
     if not TELEGRAM_BOT_TOKEN:
         raise ValueError("TELEGRAM_BOT_TOKEN 未設定")
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("start",     cmd_start))
     app.add_handler(CommandHandler("subscribe", cmd_subscribe))
-    app.add_handler(CommandHandler("my_sub", cmd_my_sub))
-    app.add_handler(CommandHandler("del_sub", cmd_del_sub))
-    app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("my_sub",    cmd_my_sub))
+    app.add_handler(CommandHandler("del_sub",   cmd_del_sub))
+    app.add_handler(CommandHandler("help",      cmd_help))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     return app
 
 
 async def init_telegram(webhook_url: str = "") -> None:
-    """初始化並設定 webhook（main.py lifespan 呼叫）。"""
     global _tg_app
     if not TELEGRAM_BOT_TOKEN:
         logger.info("TELEGRAM_BOT_TOKEN 未設定，Telegram bot 停用")
@@ -346,11 +368,10 @@ async def init_telegram(webhook_url: str = "") -> None:
         await _tg_app.bot.set_webhook(webhook_url)
         logger.info(f"Telegram webhook 已設定：{webhook_url}")
     else:
-        logger.warning("未設定 Telegram webhook URL，bot 不接收訊息（僅限本機測試用 ngrok）")
+        logger.warning("未設定 Telegram webhook URL，bot 不接收訊息（僅限本機 ngrok 測試）")
 
 
 async def shutdown_telegram() -> None:
-    """關閉 Telegram bot（main.py lifespan 呼叫）。"""
     global _tg_app
     if _tg_app:
         await _tg_app.stop()
