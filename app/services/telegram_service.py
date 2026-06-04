@@ -181,10 +181,10 @@ async def cmd_start(update: Update, context) -> None:
         "👋 歡迎使用政府職缺查詢 Bot！",
         "",
         "指令：",
-        "/subscribe  設定訂閱條件",
-        "/my\\_sub    查看目前設定",
-        "/del\\_sub   刪除訂閱",
-        "/help       使用說明",
+        "/subscribe         設定訂閱條件",
+        "/mysubscription    查看目前設定",
+        "/deletesubscription 刪除訂閱",
+        "/help              使用說明",
         "",
         "傳任何訊息即可查詢最新職缺！",
     ]))
@@ -196,7 +196,7 @@ async def cmd_subscribe(update: Update, context) -> None:
     await _ask_location(user_id, chat_id, context.bot)
 
 
-async def cmd_my_sub(update: Update, context) -> None:
+async def cmd_mysubscription(update: Update, context) -> None:
     sub = get_subscription("telegram", str(update.effective_user.id))
     if not sub:
         await update.message.reply_text("尚未設定訂閱條件。\n\n輸入 /subscribe 開始設定。")
@@ -213,7 +213,7 @@ async def cmd_my_sub(update: Update, context) -> None:
         ]))
 
 
-async def cmd_del_sub(update: Update, context) -> None:
+async def cmd_deletesubscription(update: Update, context) -> None:
     user_id = update.effective_user.id
     delete_subscription("telegram", str(user_id))
     _conv.pop(user_id, None)
@@ -224,9 +224,9 @@ async def cmd_help(update: Update, context) -> None:
     await update.message.reply_text("\n".join([
         "📋 使用說明",
         "",
-        "/subscribe  設定訂閱條件",
-        "/my\\_sub    查看目前設定",
-        "/del\\_sub   刪除訂閱",
+        "/subscribe          設定訂閱條件",
+        "/mysubscription     查看目前設定",
+        "/deletesubscription 刪除訂閱",
         "",
         "傳任何訊息即可查詢最新職缺。",
     ]))
@@ -329,10 +329,10 @@ async def handle_message(update: Update, context) -> None:
         await _ask_location(user_id, chat_id, context.bot)
         return
     if text in {"我的訂閱", "查看訂閱"}:
-        await cmd_my_sub(update, context)
+        await cmd_mysubscription(update, context)
         return
     if text in {"刪除訂閱", "取消訂閱"}:
-        await cmd_del_sub(update, context)
+        await cmd_deletesubscription(update, context)
         return
     if text in {"說明", "help"}:
         await cmd_help(update, context)
@@ -354,11 +354,11 @@ def build_telegram_app() -> Application:
     if not TELEGRAM_BOT_TOKEN:
         raise ValueError("TELEGRAM_BOT_TOKEN 未設定")
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start",     cmd_start))
-    app.add_handler(CommandHandler("subscribe", cmd_subscribe))
-    app.add_handler(CommandHandler("my_sub",    cmd_my_sub))
-    app.add_handler(CommandHandler("del_sub",   cmd_del_sub))
-    app.add_handler(CommandHandler("help",      cmd_help))
+    app.add_handler(CommandHandler("start",              cmd_start))
+    app.add_handler(CommandHandler("subscribe",          cmd_subscribe))
+    app.add_handler(CommandHandler("mysubscription",     cmd_mysubscription))
+    app.add_handler(CommandHandler("deletesubscription", cmd_deletesubscription))
+    app.add_handler(CommandHandler("help",               cmd_help))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     return app
