@@ -16,7 +16,7 @@ from linebot.v3.messaging import (
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
 from app.crawler.form_options import SYSNAM_GRP_OPTIONS, get_form_options
-from app.db.database import delete_subscription, get_subscription, save_subscription
+from app.db.database import delete_subscription, get_subscription, save_subscription, upsert_line_user
 from app.models.subscription import Subscription
 from app.services.query_service import handle_user_query
 from app.utils.config import LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET
@@ -242,6 +242,12 @@ def handle_message(event: MessageEvent) -> None:
     step        = _conv.get(user_id, {}).get("step", "idle")
 
     logger.info(f"LINE user={user_id[:8]} step={step!r} text={text[:50]!r}")
+
+    # 記錄使用者（非同步，失敗不影響主流程）
+    try:
+        upsert_line_user(user_id)
+    except Exception:
+        pass
 
     # ── 全域指令（優先於對話狀態）────────────────────────────────────────────
     if text in _TRIGGERS_SUBSCRIBE:

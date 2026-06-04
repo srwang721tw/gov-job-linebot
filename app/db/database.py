@@ -4,6 +4,8 @@
   - 正式環境：Neon PostgreSQL（設定 DATABASE_URL 環境變數）
 
 資料表：
+  line_user     LINE Bot 使用者
+  telegram_user Telegram Bot 使用者
   subscription  使用者訂閱條件（LINE + Telegram 共用）
   jobs          每日爬取的政府職缺資料（含詳細頁）
 
@@ -21,6 +23,61 @@ from app.utils.logger import logger
 _IS_POSTGRES = bool(DATABASE_URL)
 
 # ── 建表 SQL ─────────────────────────────────────────────────────────────────
+
+_CREATE_LINE_USER_PG = """
+CREATE TABLE IF NOT EXISTS line_user (
+    line_user_id VARCHAR(50)  PRIMARY KEY,
+    display_name VARCHAR(100) DEFAULT '',
+    created_at   TIMESTAMPTZ  DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ  DEFAULT NOW()
+)
+"""
+
+_CREATE_LINE_USER_SQLITE = """
+CREATE TABLE IF NOT EXISTS line_user (
+    line_user_id TEXT PRIMARY KEY,
+    display_name TEXT DEFAULT '',
+    created_at   TEXT DEFAULT (datetime('now')),
+    updated_at   TEXT DEFAULT (datetime('now'))
+)
+"""
+
+_CREATE_TELEGRAM_USER_PG = """
+CREATE TABLE IF NOT EXISTS telegram_user (
+    telegram_user_id BIGINT       PRIMARY KEY,
+    username         VARCHAR(100) DEFAULT '',
+    first_name       VARCHAR(100) DEFAULT '',
+    created_at       TIMESTAMPTZ  DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ  DEFAULT NOW()
+)
+"""
+
+_CREATE_TELEGRAM_USER_SQLITE = """
+CREATE TABLE IF NOT EXISTS telegram_user (
+    telegram_user_id INTEGER PRIMARY KEY,
+    username         TEXT DEFAULT '',
+    first_name       TEXT DEFAULT '',
+    created_at       TEXT DEFAULT (datetime('now')),
+    updated_at       TEXT DEFAULT (datetime('now'))
+)
+"""
+
+_UPSERT_LINE_USER = """
+INSERT INTO line_user (line_user_id, display_name, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(line_user_id) DO UPDATE SET
+    display_name = EXCLUDED.display_name,
+    updated_at   = EXCLUDED.updated_at
+"""
+
+_UPSERT_TELEGRAM_USER = """
+INSERT INTO telegram_user (telegram_user_id, username, first_name, updated_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(telegram_user_id) DO UPDATE SET
+    username   = EXCLUDED.username,
+    first_name = EXCLUDED.first_name,
+    updated_at = EXCLUDED.updated_at
+"""
 
 _CREATE_SUBSCRIPTION_PG = """
 CREATE TABLE IF NOT EXISTS subscription (
@@ -208,12 +265,24 @@ def _run(conn, sql: str, params: tuple = ()):
 # ── 初始化 ────────────────────────────────────────────────────────────────────
 
 def init_db() -> None:
-    create_sub = _CREATE_SUBSCRIPTION_PG if _IS_POSTGRES else _CREATE_SUBSCRIPTION_SQLITE
-    create_jobs = _CREATE_JOBS_PG if _IS_POSTGRES else _CREATE_JOBS_SQLITE
+    if _IS_POSTGRES:
+        stmts = [
+            _CREATE_LINE_USER_PG,
+            _CREATE_TELEGRAM_USER_PG,
+            _CREATE_SUBSCRIPTION_PG,
+            _CREATE_JOBS_PG,
+        ]
+    else:
+        stmts = [
+            _CREATE_LINE_USER_SQLITE,
+            _CREATE_TELEGRAM_USER_SQLITE,
+            _CREATE_SUBSCRIPTION_SQLITE,
+            _CREATE_JOBS_SQLITE,
+        ]
 
     with get_conn() as conn:
-        _run(conn, create_sub)
-        _run(conn, create_jobs)
+        for sql in stmts:
+            _run(conn, sql)
         for idx_sql in _CREATE_JOBS_IDX:
             _run(conn, idx_sql)
         if _IS_POSTGRES:
@@ -221,6 +290,26 @@ def init_db() -> None:
 
     backend = "PostgreSQL (Neon)" if _IS_POSTGRES else "SQLite"
     logger.info(f"資料庫初始化完成（{backend}）")
+
+
+# ── 使用者 CRUD ────────────────────────────────────────────────────────────────
+
+def upsert_line_user(line_user_id: str, display_name: str = "") -> None:
+    """記錄 LINE 使用者（每次互動時更新）。"""
+    now = datetime.now(timezone.utc).isoformat()
+    with get_conn() as conn:
+        _run(conn, _UPSERT_LINE_USER, (line_user_id, display_name, now))
+
+
+def upsert_telegram_user(
+    telegram_user_id: int,
+    username: str = "",
+    first_name: str = "",
+) -> None:
+    """記錄 Telegram 使用者（每次互動時更新）。"""
+    now = datetime.now(timezone.utc).isoformat()
+    with get_conn() as conn:
+        _run(conn, _UPSERT_TELEGRAM_USER, (telegram_user_id, username, first_name, now))
 
 
 # ── 訂閱 CRUD ──────────────────────────────────────────────────────────────────

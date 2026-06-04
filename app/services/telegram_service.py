@@ -22,7 +22,7 @@ from telegram.ext import (
 )
 
 from app.crawler.form_options import SYSNAM_GRP_OPTIONS, get_form_options
-from app.db.database import delete_subscription, get_subscription, save_subscription
+from app.db.database import delete_subscription, get_subscription, save_subscription, upsert_telegram_user
 from app.models.subscription import Subscription
 from app.services.query_service import handle_user_query
 from app.utils.config import TELEGRAM_BOT_TOKEN
@@ -313,6 +313,16 @@ async def handle_message(update: Update, context) -> None:
     step    = _conv.get(user_id, {}).get("step", "idle")
 
     logger.info(f"Telegram user={user_id} step={step!r} text={text[:50]!r}")
+
+    # 記錄使用者（非同步，失敗不影響主流程）
+    try:
+        upsert_telegram_user(
+            user_id,
+            username   = update.effective_user.username or "",
+            first_name = update.effective_user.first_name or "",
+        )
+    except Exception:
+        pass
 
     # 中文快速指令
     if text in {"訂閱", "設定條件", "設定訂閱"}:
