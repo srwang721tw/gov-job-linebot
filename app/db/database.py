@@ -314,6 +314,7 @@ def init_db() -> None:
             _CREATE_JOBS_SQLITE,
         ]
 
+    # Step 1：建表（一個 transaction）
     with get_conn() as conn:
         for sql in create_stmts:
             _run(conn, sql)
@@ -321,28 +322,53 @@ def init_db() -> None:
             _run(conn, idx_sql)
         if _IS_POSTGRES:
             _run(conn, "CREATE EXTENSION IF NOT EXISTS pg_trgm")
-            # 為 search_text 建立 GIN 索引（已存在則略過）
-            _run(conn, """
-                DO $$ BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1 FROM pg_indexes
-                        WHERE tablename='jobs' AND indexname='idx_jobs_search_text'
-                    ) THEN
-                        CREATE INDEX idx_jobs_search_text ON jobs USING gin(search_text gin_trgm_ops);
-                    END IF;
-                END $$
-            """)
-            # Migration：為舊表新增欄位
-            for sql in _ALTER_SUBSCRIPTION:
-                try:
+
+    # Step 2：Migration — 每個 ALTER TABLE 各自獨立 connection，失敗不影響其他
+    if _IS_POSTGRES:
+        for sql in _ALTER_SUBSCRIPTION + _ALTER_JOBS:
+            try:
+                with get_conn() as conn:
                     _run(conn, sql)
-                except Exception as e:
-                    logger.debug(f"ALTER subscription 略過（可能已存在）: {e}")
-            for sql in _ALTER_JOBS:
-                try:
+            except Exception as e:
+                logger.debug(f"ALTER 略過（可能已存在）: {e}")
+
+    # Step 3：資料 Migration — 將舊欄位資料複製到新欄位（已是新值則 COALESCE 不覆蓋）
+    if _IS_POSTGRES:
+        _data_migrations = [
+            # deadline_end_iso → deadline_end（舊欄位存在時才執行）
+            """
+            UPDATE jobs
+               SET deadline_end = deadline_end_iso
+             WHERE deadline_end IS DISTINCT FROM deadline_end_iso
+               AND deadline_end = ''
+               AND deadline_end_iso IS NOT NULL
+               AND deadline_end_iso != ''
+            """,
+        ]
+        for sql in _data_migrations:
+            try:
+                with get_conn() as conn:
                     _run(conn, sql)
-                except Exception as e:
-                    logger.debug(f"ALTER jobs 略過（可能已存在）: {e}")
+            except Exception as e:
+                logger.debug(f"資料 migration 略過: {e}")
+
+    # Step 4：建立 GIN 索引（在 search_text 欄位確定存在後才執行）
+    if _IS_POSTGRES:
+        try:
+            with get_conn() as conn:
+                _run(conn, """
+                    DO $$ BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_indexes
+                            WHERE tablename='jobs' AND indexname='idx_jobs_search_text'
+                        ) THEN
+                            CREATE INDEX idx_jobs_search_text
+                                ON jobs USING gin(search_text gin_trgm_ops);
+                        END IF;
+                    END $$
+                """)
+        except Exception as e:
+            logger.warning(f"GIN 索引建立失敗（不影響功能）: {e}")
 
     backend = "PostgreSQL (Neon)" if _IS_POSTGRES else "SQLite"
     logger.info(f"資料庫初始化完成（{backend}）")
