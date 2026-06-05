@@ -11,12 +11,16 @@ v3.1 改動：
   - 移除 person_kind、contact_method、apply_method
 """
 import re
+import socket
 import time
 from datetime import datetime, timezone, timedelta
 from typing import List
 from urllib.parse import urljoin
 
 import requests
+import urllib3.util.connection as _urllib3_cn
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 
 from app.crawler.form_options import (
@@ -33,6 +37,10 @@ from app.utils.config import (
 )
 from app.utils.logger import logger
 
+# ── 強制 IPv4（解決 Render 等主機 IPv6 路由不通的問題）────────────────────────
+# DGPA 網站只支援 IPv4；部分雲端環境預設嘗試 IPv6 → errno 101 Network unreachable
+_urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
+
 LIST_URL = CRAWLER_BASE_URL + CRAWLER_LIST_PAGE
 DETAIL_BASE = CRAWLER_BASE_URL + "/"
 
@@ -42,6 +50,23 @@ HEADERS = {
     "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
     "Referer": LIST_URL,
 }
+
+# ── 請求重試策略 ──────────────────────────────────────────────────────────────
+_RETRY = Retry(
+    total=3,
+    backoff_factor=2,          # 1s → 2s → 4s
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET", "POST"],
+)
+
+
+def _new_session() -> requests.Session:
+    """建立帶重試策略的 requests Session（強制 IPv4）。"""
+    s = requests.Session()
+    adapter = HTTPAdapter(max_retries=_RETRY)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+    return s
 
 
 # ── 日期工具 ──────────────────────────────────────────────────────────────────
@@ -251,7 +276,10 @@ def _has_next_page(soup: BeautifulSoup) -> bool:
 
 # ── 詳細頁解析 ────────────────────────────────────────────────────────────────
 
-def fetch_job_detail(session: requests.Session, url: str) -> dict:
+def fetch_job_detail(session: requests.Session | None, url: str) -> dict:
+    """session 為 None 時自動建立新 Session。"""
+    if session is None:
+        session = _new_session()
     """
     抓取職缺詳細頁並解析關鍵欄位。
     已驗證的 element ID（2026-05）：
@@ -410,7 +438,7 @@ def crawl_jobs(
         max_pages:     最多爬幾頁（0 = 不限）
         fetch_detail:  是否同時抓取詳細頁（排程爬取時用）
     """
-    session   = requests.Session()
+    session   = _new_session()
     date_to   = _roc_today()
     date_from = _roc_days_ago(lookback_days)
     logger.info(

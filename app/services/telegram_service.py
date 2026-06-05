@@ -378,14 +378,19 @@ async def handle_callback(update: Update, context) -> None:
 
     # ── 地點相關 ─────────────────────────────────────────────────────────────
     if step == "setup_location":
-        opts = _conv[user_id].get("loc_options", _location_options())
+        opts = _conv[user_id].get("loc_options") or _location_options()
         selected = set(c for c in pending.get("work_place_codes", "").split(",") if c)
+
+        def _loc_status(sel: set) -> str:
+            names = [o["text"] for o in opts if o["value"] in sel]
+            return "、".join(names) if names else "（未選擇，點確定等於不限）"
 
         if data.startswith("LP:"):
             page = int(data[3:])
             _conv[user_id]["page"] = page
-            await query.edit_message_reply_markup(
-                _build_multiselect_kb(opts, page, "LC", "LP", selected, "LC:CONFIRM", "LC:ALL")
+            await query.edit_message_text(
+                f"📍 請選擇工作地點（可多選）：\n已選：{_loc_status(selected)}",
+                reply_markup=_build_multiselect_kb(opts, page, "LC", "LP", selected, "LC:CONFIRM", "LC:ALL"),
             )
             return
 
@@ -395,14 +400,13 @@ async def handle_callback(update: Update, context) -> None:
                 selected.discard(code)
             else:
                 selected.add(code)
+            names = [o["text"] for o in opts if o["value"] in selected]
             pending["work_place_codes"] = ",".join(selected)
-            # 同步 names
-            loc_opts = _conv[user_id].get("loc_options", opts)
-            names = [o["text"] for o in loc_opts if o["value"] in selected]
             pending["work_place_names"] = ",".join(names) if names else "不限"
             page = _conv[user_id].get("page", 0)
-            await query.edit_message_reply_markup(
-                _build_multiselect_kb(opts, page, "LC", "LP", selected, "LC:CONFIRM", "LC:ALL")
+            await query.edit_message_text(
+                f"📍 請選擇工作地點（可多選）：\n已選：{_loc_status(selected)}",
+                reply_markup=_build_multiselect_kb(opts, page, "LC", "LP", selected, "LC:CONFIRM", "LC:ALL"),
             )
             return
 
@@ -423,6 +427,25 @@ async def handle_callback(update: Update, context) -> None:
     if step == "setup_rank_types":
         selected_codes = set(c for c in pending.get("rank_types", "").split(",") if c)
 
+        def _rank_kb(sel: set) -> InlineKeyboardMarkup:
+            rank_opts = [{"value": c, "text": n} for c, n in _RANK_TYPE_NAMES.items()]
+            rows = []
+            for i in range(0, len(rank_opts), _ITEMS_PER_ROW):
+                row = []
+                for o in rank_opts[i:i + _ITEMS_PER_ROW]:
+                    label = f"✅ {o['text']}" if o["value"] in sel else f"☐ {o['text']}"
+                    row.append(InlineKeyboardButton(label, callback_data=f"RC:{o['value']}"))
+                rows.append(row)
+            rows.append([
+                InlineKeyboardButton("不限官等", callback_data="RC:ALL"),
+                InlineKeyboardButton(f"✅ 確定 ({len(sel)})", callback_data="RC:CONFIRM"),
+            ])
+            return InlineKeyboardMarkup(rows)
+
+        def _rank_status(sel: set) -> str:
+            names = [_RANK_TYPE_NAMES[c] for c in ["1","2","3","4"] if c in sel]
+            return "、".join(names) if names else "（未選擇，點確定等於不限）"
+
         if data.startswith("RC:") and data not in ("RC:CONFIRM", "RC:ALL"):
             code = data[3:]
             if code in selected_codes:
@@ -430,20 +453,10 @@ async def handle_callback(update: Update, context) -> None:
             else:
                 selected_codes.add(code)
             pending["rank_types"] = ",".join(selected_codes)
-            # 重繪 InlineKeyboard
-            opts = [{"value": code, "text": name} for code, name in _RANK_TYPE_NAMES.items()]
-            rows = []
-            for i in range(0, len(opts), _ITEMS_PER_ROW):
-                row = []
-                for o in opts[i:i + _ITEMS_PER_ROW]:
-                    label = f"✅ {o['text']}" if o["value"] in selected_codes else f"☐ {o['text']}"
-                    row.append(InlineKeyboardButton(label, callback_data=f"RC:{o['value']}"))
-                rows.append(row)
-            rows.append([
-                InlineKeyboardButton("不限官等", callback_data="RC:ALL"),
-                InlineKeyboardButton(f"✅ 確定 ({len(selected_codes)})", callback_data="RC:CONFIRM"),
-            ])
-            await query.edit_message_reply_markup(InlineKeyboardMarkup(rows))
+            await query.edit_message_text(
+                f"👔 請選擇官等類別（可複選）：\n已選：{_rank_status(selected_codes)}",
+                reply_markup=_rank_kb(selected_codes),
+            )
             return
 
         if data == "RC:ALL":
@@ -477,11 +490,15 @@ async def handle_callback(update: Update, context) -> None:
         sysnam_opts = _conv[user_id].get("sysnam_options", [])
         selected = set(n for n in pending.get("sysnam_names", "").split(",") if n)
 
+        def _sysnam_status(sel: set) -> str:
+            return "、".join(sel) if sel else "（未選擇，點確定等於不限）"
+
         if data.startswith("NP:"):
             page = int(data[3:])
             _conv[user_id]["page"] = page
-            await query.edit_message_reply_markup(
-                _build_multiselect_kb(sysnam_opts, page, "NC", "NP", selected, "NC:CONFIRM", "NC:ALL")
+            await query.edit_message_text(
+                f"🗂 請選擇職系細項（可多選）：\n已選：{_sysnam_status(selected)}",
+                reply_markup=_build_multiselect_kb(sysnam_opts, page, "NC", "NP", selected, "NC:CONFIRM", "NC:ALL"),
             )
             return
 
@@ -493,8 +510,9 @@ async def handle_callback(update: Update, context) -> None:
                 selected.add(name)
             pending["sysnam_names"] = ",".join(selected)
             page = _conv[user_id].get("page", 0)
-            await query.edit_message_reply_markup(
-                _build_multiselect_kb(sysnam_opts, page, "NC", "NP", selected, "NC:CONFIRM", "NC:ALL")
+            await query.edit_message_text(
+                f"🗂 請選擇職系細項（可多選）：\n已選：{_sysnam_status(selected)}",
+                reply_markup=_build_multiselect_kb(sysnam_opts, page, "NC", "NP", selected, "NC:CONFIRM", "NC:ALL"),
             )
             return
 
