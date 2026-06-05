@@ -1,6 +1,8 @@
 """
-職缺資料模型（v3）。
-欄位同時對應列表頁與詳細頁的資料，由爬蟲在合併後建立。
+職缺資料模型（v3.1）。
+
+所有日期均以 YYYY-MM-DD 字串儲存。
+rank_grade_min / rank_grade_max = 0 表示無法解析或不分職等。
 """
 from pydantic import BaseModel
 
@@ -12,27 +14,29 @@ class Job(BaseModel):
     # ── 列表頁欄位 ──────────────────────────────────────────────────────────────
     title: str = ""                  # 職稱
     org_name: str = ""               # 機關名稱
-    work_place: str = ""             # 工作地點（已清除代碼前綴）
+    work_place: str = ""             # 工作地點（已清除代碼前綴，如「臺北市」）
     work_place_code: str = ""        # 工作地點代碼（DGPA dropdown value）
-    rank_type: str = ""              # 官等（簡任/薦任/委任/其他）
-    job_series: str = ""             # 職系名稱（e.g. 綜合行政）
+    rank_type: str = ""              # 官等原始文字（如「薦任第6至第9職等」）
+    rank_type_codes: str = ""        # 推算代碼，逗號分隔（1=簡任,2=薦任,3=委任,4=其他）
+    rank_grade_min: int = 0          # 最低職等（0=無法解析）
+    rank_grade_max: int = 0          # 最高職等（0=無法解析）
+    job_series: str = ""             # 職系名稱（如「綜合行政」）
     sysnam_grp: str = ""             # 職系大分類：'' / 'A'（行政）/ 'B'（技術）
 
     # ── 詳細頁欄位（fetch_detail=True 時填入）──────────────────────────────────
-    person_kind: str = ""            # 人員區分名稱（e.g. 聘用人員）
-    person_kind_code: str = ""       # 人員區分代碼
-    regular_slots: int = 0           # 正取名額（TODO: 確認 DGPA element ID）
-    alternate_slots: int = 0         # 候補名額（TODO: 確認 DGPA element ID）
-    qualifications: str = ""         # 應徵資格條件
-    work_items: str = ""             # 工作說明
-    work_address: str = ""           # 詳細工作地址
-    contact_method: str = ""         # 聯絡方式
-    apply_method: str = ""           # 應徵方式
+    regular_slots: int = 0           # 正取名額
+    alternate_slots: int = 0         # 候補名額
+    qualifications: str = ""         # 資格條件（PLWORK_QUALITY）
+    work_items: str = ""             # 工作項目（PLWORK_ITEM）
+    work_address: str = ""           # 詳細工作地址（PLWORK_ADDRESS）
 
-    # ── 日期欄位 ────────────────────────────────────────────────────────────────
-    publish_date: str = ""           # 公告日（民國年字串）
-    deadline: str = ""               # 有效期間原始字串 "115/05/30~115/06/03"
-    deadline_end_iso: str = ""       # 截止日 ISO 格式 "2026-06-03"（供 DB 篩選）
+    # ── 日期欄位（均為 YYYY-MM-DD）──────────────────────────────────────────────
+    publish_date: str = ""           # 公告日
+    deadline_start: str = ""         # 受理起始日
+    deadline_end: str = ""           # 截止日（供 DB 篩選）
+
+    # ── 全文搜尋 ────────────────────────────────────────────────────────────────
+    search_text: str = ""            # title+org_name+qualifications+work_items（供 pg_trgm）
 
     # ── 連結 ────────────────────────────────────────────────────────────────────
     job_url: str = ""                # 詳細頁完整 URL

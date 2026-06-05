@@ -1,11 +1,33 @@
 """
-Telegram Bot 服務（v3）。
+Telegram Bot 服務（v3.1）。
 與 LINE bot 共用 query_service、database、form_options 層。
 
-訂閱設定流程：InlineKeyboard 引導（地點 → 人員類別 → 職系大分類 → 關鍵字）
-查詢觸發：任何文字訊息 → handle_user_query(platform='telegram', ...)
+訂閱設定流程（7 步驟，InlineKeyboard）：
+  1. 工作地點（多選 + 確定）
+  2. 官等類別（多選 + 確定）
+  3. 職系大分類（單選）
+  4. 職系細項（多選 + 確定，大分類=不限則略過）
+  5. 職務列等區間（文字輸入）
+  6. 關鍵字（文字輸入）
+  7. 確認摘要
+
+callback_data 前綴：
+  LC:CODE   選擇地點（CODE=_ 表空值）
+  LP:N      地點翻頁
+  LC:ALL    不限地區（清除所有選擇並前往下一步）
+  LC:CONFIRM 地點確認
+  RC:CODE   選擇官等（1~4）
+  RC:ALL    不限官等
+  RC:CONFIRM 官等確認
+  SC:GRP    選擇職系大分類
+  NC:IDX    選擇職系細項（index in options list）
+  NP:N      職系細項翻頁
+  NC:ALL    不限細項
+  NC:CONFIRM 職系細項確認
+  SKIP      略過（職務列等/關鍵字）
 """
 import re
+import urllib.parse
 from typing import Optional
 
 from telegram import (
@@ -21,7 +43,7 @@ from telegram.ext import (
     filters,
 )
 
-from app.crawler.form_options import SYSNAM_GRP_OPTIONS, get_form_options
+from app.crawler.form_options import SYSNAM_GRP_OPTIONS, get_form_options, get_sysnam_names_for_grp
 from app.db.database import delete_subscription, get_subscription, save_subscription, upsert_telegram_user
 from app.models.subscription import Subscription
 from app.services.query_service import handle_user_query
@@ -34,17 +56,16 @@ _tg_app: Optional[Application] = None
 # ── 對話狀態 ─────────────────────────────────────────────────────────────────
 _conv: dict[int, dict] = {}
 
-# Inline keyboard 每頁顯示幾個選項、每行幾個
-_PAGE_SIZE    = 8
+_PAGE_SIZE     = 8   # Inline keyboard 每頁顯示幾個選項
 _ITEMS_PER_ROW = 2
 
-# ── callback_data 前綴 ────────────────────────────────────────────────────────
-# LC:CODE  → 選擇地點
-# LP:N     → 地點翻頁到第 N 頁
-# PC:CODE  → 選擇人員類別
-# PP:N     → 人員類別翻頁
-# SC:GRP   → 選擇職系大分類（GRP: '_'=不限, 'A', 'B'）
-# SKIP     → 略過關鍵字
+# 官等代碼 → 名稱
+_RANK_TYPE_NAMES = {
+    "1": "簡任",
+    "2": "薦任",
+    "3": "委任",
+    "4": "其他",
+}
 
 
 # ── 工具函式 ──────────────────────────────────────────────────────────────────
@@ -59,12 +80,8 @@ def _location_options() -> list[dict]:
     return [
         {"value": o["value"], "text": _clean_name(o["text"])}
         for o in get_form_options().get("work_place", [])
-        if not o["value"].endswith("00")  # 過濾分組標題
+        if not o["value"].endswith("00")
     ]
-
-
-def _person_kind_options() -> list[dict]:
-    return list(get_form_options().get("person_kind", []))
 
 
 def _encode_val(v: str) -> str:
@@ -75,25 +92,32 @@ def _decode_val(v: str) -> str:
     return "" if v == "_" else v
 
 
-def _build_kb(
+def _build_multiselect_kb(
     options: list[dict],
     page: int,
     sel_prefix: str,
     page_prefix: str,
+    selected_values: set[str],
+    confirm_data: str,
+    all_data: str,
 ) -> InlineKeyboardMarkup:
+    """
+    建立多選 InlineKeyboard（帶 ✅/☐ 切換）。
+    """
     start = page * _PAGE_SIZE
     end   = min(start + _PAGE_SIZE, len(options))
     chunk = options[start:end]
 
     rows = []
     for i in range(0, len(chunk), _ITEMS_PER_ROW):
-        rows.append([
-            InlineKeyboardButton(
-                text=o["text"],
+        row = []
+        for o in chunk[i:i + _ITEMS_PER_ROW]:
+            label = f"✅ {o['text']}" if o["value"] in selected_values else f"☐ {o['text']}"
+            row.append(InlineKeyboardButton(
+                text=label,
                 callback_data=f"{sel_prefix}:{_encode_val(o['value'])}",
-            )
-            for o in chunk[i:i + _ITEMS_PER_ROW]
-        ])
+            ))
+        rows.append(row)
 
     nav = []
     if page > 0:
@@ -103,28 +127,55 @@ def _build_kb(
     if nav:
         rows.append(nav)
 
+    # 不限 + 確定
+    rows.append([
+        InlineKeyboardButton("不限（清除全選）", callback_data=all_data),
+        InlineKeyboardButton(f"✅ 確定 ({len(selected_values)})", callback_data=confirm_data),
+    ])
     return InlineKeyboardMarkup(rows)
 
 
 # ── 訂閱設定步驟 ──────────────────────────────────────────────────────────────
 
 async def _ask_location(user_id: int, chat_id: int, bot) -> None:
-    opts = [{"value": "", "text": "不限地區"}] + _location_options()
-    _conv[user_id] = {"step": "setup_location", "page": 0, "options": opts, "pending": {}}
-    kb = _build_kb(opts, 0, "LC", "LP")
-    await bot.send_message(chat_id=chat_id, text="📍 請選擇工作地點：", reply_markup=kb)
+    """步驟 1：多選工作地點。"""
+    opts = _location_options()
+    selected = set(_conv[user_id].get("pending", {}).get("work_place_codes", "").split(",")) - {""}
+    _conv[user_id].update({"step": "setup_location", "page": 0, "loc_options": opts})
+    kb = _build_multiselect_kb(opts, 0, "LC", "LP", selected, "LC:CONFIRM", "LC:ALL")
+    await bot.send_message(chat_id=chat_id, text="📍 請選擇工作地點（可多選）：", reply_markup=kb)
 
 
-async def _ask_person_kind(user_id: int, chat_id: int, bot) -> None:
-    opts = [{"value": "", "text": "不限類別"}] + _person_kind_options()
-    _conv[user_id].update({"step": "setup_person_kind", "page": 0, "options": opts})
-    kb = _build_kb(opts, 0, "PC", "PP")
-    await bot.send_message(chat_id=chat_id, text="👤 請選擇人員類別：", reply_markup=kb)
+async def _ask_rank_types(user_id: int, chat_id: int, bot) -> None:
+    """步驟 2：多選官等類別。"""
+    selected_codes = set(
+        c for c in _conv[user_id].get("pending", {}).get("rank_types", "").split(",") if c
+    )
+    opts = [{"value": code, "text": name} for code, name in _RANK_TYPE_NAMES.items()]
+    _conv[user_id].update({"step": "setup_rank_types", "page": 0})
+
+    rows = []
+    for i in range(0, len(opts), _ITEMS_PER_ROW):
+        row = []
+        for o in opts[i:i + _ITEMS_PER_ROW]:
+            label = f"✅ {o['text']}" if o["value"] in selected_codes else f"☐ {o['text']}"
+            row.append(InlineKeyboardButton(label, callback_data=f"RC:{o['value']}"))
+        rows.append(row)
+    rows.append([
+        InlineKeyboardButton("不限官等", callback_data="RC:ALL"),
+        InlineKeyboardButton(f"✅ 確定 ({len(selected_codes)})", callback_data="RC:CONFIRM"),
+    ])
+    await bot.send_message(
+        chat_id=chat_id,
+        text="👔 請選擇官等類別（可複選）：",
+        reply_markup=InlineKeyboardMarkup(rows),
+    )
 
 
 async def _ask_sysnam_grp(user_id: int, chat_id: int, bot) -> None:
-    opts = SYSNAM_GRP_OPTIONS  # 不限 / 行政類 / 技術類
-    _conv[user_id].update({"step": "setup_sysnam_grp", "page": 0, "options": opts})
+    """步驟 3：單選職系大分類。"""
+    opts = SYSNAM_GRP_OPTIONS
+    _conv[user_id].update({"step": "setup_sysnam_grp"})
     rows = [[
         InlineKeyboardButton(o["text"], callback_data=f"SC:{_encode_val(o['value'])}")
         for o in opts
@@ -136,42 +187,112 @@ async def _ask_sysnam_grp(user_id: int, chat_id: int, bot) -> None:
     )
 
 
-async def _ask_keyword(user_id: int, chat_id: int, bot) -> None:
-    _conv[user_id]["step"] = "setup_keyword"
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("略過", callback_data="SKIP")]])
+async def _ask_sysnam_names(user_id: int, chat_id: int, bot, sysnam_grp: str) -> None:
+    """步驟 4：多選職系細項（依大分類動態載入）。"""
+    opts_raw = get_sysnam_names_for_grp(sysnam_grp)  # list[str]
+    opts = [{"value": n, "text": n} for n in opts_raw]
+    selected = set(
+        n for n in _conv[user_id].get("pending", {}).get("sysnam_names", "").split(",") if n
+    )
+    _conv[user_id].update({"step": "setup_sysnam_names", "page": 0, "sysnam_options": opts})
+    kb = _build_multiselect_kb(opts, 0, "NC", "NP", selected, "NC:CONFIRM", "NC:ALL")
     await bot.send_message(
         chat_id=chat_id,
-        text="🔍 請輸入職缺名稱關鍵字\n（例如：採購、資訊、行政）\n\n或點「略過」不限：",
+        text="🗂 請選擇職系細項（可多選）：",
         reply_markup=kb,
     )
 
 
-async def _save_and_confirm(user_id: int, keyword: str, chat_id: int, bot) -> None:
+async def _ask_rank_grade(user_id: int, chat_id: int, bot) -> None:
+    """步驟 5：文字輸入職務列等區間。"""
+    _conv[user_id]["step"] = "setup_rank_grade"
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("略過", callback_data="SKIP")]])
+    await bot.send_message(
+        chat_id=chat_id,
+        text=(
+            "📊 請輸入職等範圍（格式：最低-最高，如 5-9）\n"
+            "單一職等直接輸入數字（如 9）\n"
+            "職等範圍 1~14\n\n"
+            "或點「略過」不限職等："
+        ),
+        reply_markup=kb,
+    )
+
+
+async def _ask_keywords(user_id: int, chat_id: int, bot) -> None:
+    """步驟 6：文字輸入關鍵字。"""
+    _conv[user_id]["step"] = "setup_keywords"
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("略過", callback_data="SKIP")]])
+    await bot.send_message(
+        chat_id=chat_id,
+        text=(
+            "🔍 請輸入搜尋關鍵字（逗號分隔），\n"
+            "比對職稱、機關、資格、工作項目\n"
+            "例如：採購,資訊,行政\n\n"
+            "或點「略過」不限關鍵字："
+        ),
+        reply_markup=kb,
+    )
+
+
+async def _save_and_confirm(user_id: int, keywords: str, chat_id: int, bot) -> None:
+    """步驟 7：儲存並顯示摘要。"""
     pending = _conv.get(user_id, {}).get("pending", {})
+    rank_types = pending.get("rank_types", "")
+    type_names = [_RANK_TYPE_NAMES[c] for c in ["1","2","3","4"] if c in rank_types.split(",")]
+
     sub = Subscription(
-        platform         = "telegram",
-        platform_user_id = str(user_id),
-        work_place_code  = pending.get("work_place_code", ""),
-        work_place_name  = pending.get("work_place_name", "不限"),
-        person_kind_code = pending.get("person_kind_code", ""),
-        person_kind_name = pending.get("person_kind_name", "不限"),
-        sysnam_grp       = pending.get("sysnam_grp", ""),
-        sysnam_grp_name  = pending.get("sysnam_grp_name", "不限"),
-        title_keyword    = keyword,
+        platform          = "telegram",
+        platform_user_id  = str(user_id),
+        work_place_codes  = pending.get("work_place_codes", ""),
+        work_place_names  = pending.get("work_place_names", "不限"),
+        rank_types        = rank_types,
+        rank_grade_min    = pending.get("rank_grade_min", 0),
+        rank_grade_max    = pending.get("rank_grade_max", 0),
+        sysnam_grp        = pending.get("sysnam_grp", ""),
+        sysnam_grp_name   = pending.get("sysnam_grp_name", "不限"),
+        sysnam_names      = pending.get("sysnam_names", ""),
+        keywords          = keywords,
     )
     save_subscription(sub)
     _conv.pop(user_id, None)
 
+    grade_min, grade_max = sub.rank_grade_min, sub.rank_grade_max
+    if grade_min == 0 and grade_max == 0:
+        grade_str = "不限"
+    elif grade_min == grade_max:
+        grade_str = f"{grade_min}職等"
+    else:
+        grade_str = f"{grade_min}-{grade_max}職等"
+
     await bot.send_message(chat_id=chat_id, text="\n".join([
         "✅ 訂閱設定完成！",
         "",
-        f"📍 地點：{sub.work_place_name}",
-        f"👤 類別：{sub.person_kind_name}",
-        f"🗂 職系：{sub.sysnam_grp_name}",
-        f"🔍 關鍵字：{sub.title_keyword or '不限'}",
+        f"📍 地點：{sub.work_place_names.replace(',', '、')}",
+        f"👔 官等：{'、'.join(type_names) or '不限'}",
+        f"🗂 職系：{sub.sysnam_grp_name}" + (f"（{sub.sysnam_names.replace(',','、')}）" if sub.sysnam_names else ""),
+        f"📊 職等：{grade_str}",
+        f"🔍 關鍵字：{sub.keywords or '不限'}",
         "",
         "傳任何訊息即可查詢最新職缺。",
     ]))
+
+
+# ── 職等解析工具 ──────────────────────────────────────────────────────────────
+
+def _parse_grade_range(text: str) -> tuple[int, int]:
+    text = text.strip()
+    if not text or text in ("略過", "不限"):
+        return (0, 0)
+    m = re.match(r"^(\d+)\s*[-~至]\s*(\d+)$", text)
+    if m:
+        lo, hi = int(m.group(1)), int(m.group(2))
+        return (min(lo, hi), max(lo, hi))
+    m2 = re.match(r"^(\d+)$", text)
+    if m2:
+        v = int(m2.group(1))
+        return (v, v)
+    return (0, 0)
 
 
 # ── Command handlers ──────────────────────────────────────────────────────────
@@ -181,10 +302,10 @@ async def cmd_start(update: Update, context) -> None:
         "👋 歡迎使用政府職缺查詢 Bot！",
         "",
         "指令：",
-        "/subscribe         設定訂閱條件",
-        "/mysubscription    查看目前設定",
+        "/subscribe          設定訂閱條件",
+        "/mysubscription     查看目前設定",
         "/deletesubscription 刪除訂閱",
-        "/help              使用說明",
+        "/help               使用說明",
         "",
         "傳任何訊息即可查詢最新職缺！",
     ]))
@@ -193,6 +314,7 @@ async def cmd_start(update: Update, context) -> None:
 async def cmd_subscribe(update: Update, context) -> None:
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
+    _conv[user_id] = {"step": "setup_location", "pending": {}}
     await _ask_location(user_id, chat_id, context.bot)
 
 
@@ -201,13 +323,23 @@ async def cmd_mysubscription(update: Update, context) -> None:
     if not sub:
         await update.message.reply_text("尚未設定訂閱條件。\n\n輸入 /subscribe 開始設定。")
     else:
+        rank_types = sub.rank_types
+        type_names = [_RANK_TYPE_NAMES[c] for c in ["1","2","3","4"] if c in rank_types.split(",")]
+        grade_min, grade_max = sub.rank_grade_min, sub.rank_grade_max
+        if grade_min == 0 and grade_max == 0:
+            grade_str = "不限"
+        elif grade_min == grade_max:
+            grade_str = f"{grade_min}職等"
+        else:
+            grade_str = f"{grade_min}-{grade_max}職等"
         await update.message.reply_text("\n".join([
             "📋 目前訂閱設定",
             "",
-            f"📍 地點：{sub.work_place_name or '不限'}",
-            f"👤 類別：{sub.person_kind_name or '不限'}",
-            f"🗂 職系：{sub.sysnam_grp_name or '不限'}",
-            f"🔍 關鍵字：{sub.title_keyword or '不限'}",
+            f"📍 地點：{sub.work_place_names.replace(',', '、') or '不限'}",
+            f"👔 官等：{'、'.join(type_names) or '不限'}",
+            f"🗂 職系：{sub.sysnam_grp_name or '不限'}" + (f"（{sub.sysnam_names.replace(',','、')}）" if sub.sysnam_names else ""),
+            f"📊 職等：{grade_str}",
+            f"🔍 關鍵字：{sub.keywords or '不限'}",
             "",
             "輸入 /subscribe 可重新設定。",
         ]))
@@ -242,66 +374,154 @@ async def handle_callback(update: Update, context) -> None:
     data    = query.data
     step    = _conv.get(user_id, {}).get("step", "idle")
 
-    # ── 翻頁 ─────────────────────────────────────────────────────────────────
-    if data.startswith("LP:") and step == "setup_location":
-        page = int(data[3:])
-        opts = _conv[user_id]["options"]
-        _conv[user_id]["page"] = page
-        await query.edit_message_reply_markup(_build_kb(opts, page, "LC", "LP"))
-        return
+    pending = _conv.get(user_id, {}).setdefault("pending", {})
 
-    if data.startswith("PP:") and step == "setup_person_kind":
-        page = int(data[3:])
-        opts = _conv[user_id]["options"]
-        _conv[user_id]["page"] = page
-        await query.edit_message_reply_markup(_build_kb(opts, page, "PC", "PP"))
-        return
+    # ── 地點相關 ─────────────────────────────────────────────────────────────
+    if step == "setup_location":
+        opts = _conv[user_id].get("loc_options", _location_options())
+        selected = set(c for c in pending.get("work_place_codes", "").split(",") if c)
 
-    # ── 選擇地點 ─────────────────────────────────────────────────────────────
-    if data.startswith("LC:") and step == "setup_location":
-        code = _decode_val(data[3:])
-        opts = _conv[user_id]["options"]
-        selected = next((o for o in opts if o["value"] == code), None)
-        name = selected["text"] if selected else "不限地區"
-        _conv[user_id]["pending"].update({
-            "work_place_code": code,
-            "work_place_name": name,
-        })
-        await query.edit_message_text(f"📍 地點：{name} ✓")
-        await _ask_person_kind(user_id, chat_id, context.bot)
-        return
+        if data.startswith("LP:"):
+            page = int(data[3:])
+            _conv[user_id]["page"] = page
+            await query.edit_message_reply_markup(
+                _build_multiselect_kb(opts, page, "LC", "LP", selected, "LC:CONFIRM", "LC:ALL")
+            )
+            return
 
-    # ── 選擇人員類別 ─────────────────────────────────────────────────────────
-    if data.startswith("PC:") and step == "setup_person_kind":
-        code = _decode_val(data[3:])
-        opts = _conv[user_id]["options"]
-        selected = next((o for o in opts if o["value"] == code), None)
-        name = selected["text"] if selected else "不限類別"
-        _conv[user_id]["pending"].update({
-            "person_kind_code": code,
-            "person_kind_name": name,
-        })
-        await query.edit_message_text(f"👤 類別：{name} ✓")
-        await _ask_sysnam_grp(user_id, chat_id, context.bot)
-        return
+        if data.startswith("LC:") and data not in ("LC:CONFIRM", "LC:ALL"):
+            code = _decode_val(data[3:])
+            if code in selected:
+                selected.discard(code)
+            else:
+                selected.add(code)
+            pending["work_place_codes"] = ",".join(selected)
+            # 同步 names
+            loc_opts = _conv[user_id].get("loc_options", opts)
+            names = [o["text"] for o in loc_opts if o["value"] in selected]
+            pending["work_place_names"] = ",".join(names) if names else "不限"
+            page = _conv[user_id].get("page", 0)
+            await query.edit_message_reply_markup(
+                _build_multiselect_kb(opts, page, "LC", "LP", selected, "LC:CONFIRM", "LC:ALL")
+            )
+            return
 
-    # ── 選擇職系大分類 ────────────────────────────────────────────────────────
+        if data == "LC:ALL":
+            pending["work_place_codes"] = ""
+            pending["work_place_names"] = "不限"
+            await query.edit_message_text("📍 地點：不限 ✓")
+            await _ask_rank_types(user_id, chat_id, context.bot)
+            return
+
+        if data == "LC:CONFIRM":
+            names = pending.get("work_place_names", "不限")
+            await query.edit_message_text(f"📍 地點：{names.replace(',', '、') or '不限'} ✓")
+            await _ask_rank_types(user_id, chat_id, context.bot)
+            return
+
+    # ── 官等相關 ─────────────────────────────────────────────────────────────
+    if step == "setup_rank_types":
+        selected_codes = set(c for c in pending.get("rank_types", "").split(",") if c)
+
+        if data.startswith("RC:") and data not in ("RC:CONFIRM", "RC:ALL"):
+            code = data[3:]
+            if code in selected_codes:
+                selected_codes.discard(code)
+            else:
+                selected_codes.add(code)
+            pending["rank_types"] = ",".join(selected_codes)
+            # 重繪 InlineKeyboard
+            opts = [{"value": code, "text": name} for code, name in _RANK_TYPE_NAMES.items()]
+            rows = []
+            for i in range(0, len(opts), _ITEMS_PER_ROW):
+                row = []
+                for o in opts[i:i + _ITEMS_PER_ROW]:
+                    label = f"✅ {o['text']}" if o["value"] in selected_codes else f"☐ {o['text']}"
+                    row.append(InlineKeyboardButton(label, callback_data=f"RC:{o['value']}"))
+                rows.append(row)
+            rows.append([
+                InlineKeyboardButton("不限官等", callback_data="RC:ALL"),
+                InlineKeyboardButton(f"✅ 確定 ({len(selected_codes)})", callback_data="RC:CONFIRM"),
+            ])
+            await query.edit_message_reply_markup(InlineKeyboardMarkup(rows))
+            return
+
+        if data == "RC:ALL":
+            pending["rank_types"] = ""
+            await query.edit_message_text("👔 官等：不限 ✓")
+            await _ask_sysnam_grp(user_id, chat_id, context.bot)
+            return
+
+        if data == "RC:CONFIRM":
+            selected_codes = set(c for c in pending.get("rank_types", "").split(",") if c)
+            type_names = [_RANK_TYPE_NAMES[c] for c in ["1","2","3","4"] if c in selected_codes]
+            await query.edit_message_text(f"👔 官等：{'、'.join(type_names) or '不限'} ✓")
+            await _ask_sysnam_grp(user_id, chat_id, context.bot)
+            return
+
+    # ── 職系大分類 ────────────────────────────────────────────────────────────
     if data.startswith("SC:") and step == "setup_sysnam_grp":
         grp  = _decode_val(data[3:])
         name = next((o["text"] for o in SYSNAM_GRP_OPTIONS if o["value"] == grp), "不限")
-        _conv[user_id]["pending"].update({
-            "sysnam_grp":      grp,
-            "sysnam_grp_name": name,
-        })
-        await query.edit_message_text(f"🗂 職系：{name} ✓")
-        await _ask_keyword(user_id, chat_id, context.bot)
+        pending.update({"sysnam_grp": grp, "sysnam_grp_name": name})
+        await query.edit_message_text(f"🗂 職系大分類：{name} ✓")
+        if grp:
+            await _ask_sysnam_names(user_id, chat_id, context.bot, grp)
+        else:
+            pending["sysnam_names"] = ""
+            await _ask_rank_grade(user_id, chat_id, context.bot)
         return
 
-    # ── 略過關鍵字 ────────────────────────────────────────────────────────────
-    if data == "SKIP" and step == "setup_keyword":
-        await query.edit_message_text("🔍 關鍵字：不限 ✓")
-        await _save_and_confirm(user_id, "", chat_id, context.bot)
-        return
+    # ── 職系細項 ─────────────────────────────────────────────────────────────
+    if step == "setup_sysnam_names":
+        sysnam_opts = _conv[user_id].get("sysnam_options", [])
+        selected = set(n for n in pending.get("sysnam_names", "").split(",") if n)
+
+        if data.startswith("NP:"):
+            page = int(data[3:])
+            _conv[user_id]["page"] = page
+            await query.edit_message_reply_markup(
+                _build_multiselect_kb(sysnam_opts, page, "NC", "NP", selected, "NC:CONFIRM", "NC:ALL")
+            )
+            return
+
+        if data.startswith("NC:") and data not in ("NC:CONFIRM", "NC:ALL"):
+            name = _decode_val(data[3:])
+            if name in selected:
+                selected.discard(name)
+            else:
+                selected.add(name)
+            pending["sysnam_names"] = ",".join(selected)
+            page = _conv[user_id].get("page", 0)
+            await query.edit_message_reply_markup(
+                _build_multiselect_kb(sysnam_opts, page, "NC", "NP", selected, "NC:CONFIRM", "NC:ALL")
+            )
+            return
+
+        if data == "NC:ALL":
+            pending["sysnam_names"] = ""
+            await query.edit_message_text("🗂 職系細項：不限 ✓")
+            await _ask_rank_grade(user_id, chat_id, context.bot)
+            return
+
+        if data == "NC:CONFIRM":
+            selected = set(n for n in pending.get("sysnam_names", "").split(",") if n)
+            names_str = "、".join(selected) if selected else "不限"
+            await query.edit_message_text(f"🗂 職系細項：{names_str} ✓")
+            await _ask_rank_grade(user_id, chat_id, context.bot)
+            return
+
+    # ── 略過（職等/關鍵字）────────────────────────────────────────────────────
+    if data == "SKIP":
+        if step == "setup_rank_grade":
+            pending.update({"rank_grade_min": 0, "rank_grade_max": 0})
+            await query.edit_message_text("📊 職等：不限 ✓")
+            await _ask_keywords(user_id, chat_id, context.bot)
+            return
+        if step == "setup_keywords":
+            await query.edit_message_text("🔍 關鍵字：不限 ✓")
+            await _save_and_confirm(user_id, "", chat_id, context.bot)
+            return
 
 
 # ── Message handler ───────────────────────────────────────────────────────────
@@ -314,7 +534,7 @@ async def handle_message(update: Update, context) -> None:
 
     logger.info(f"Telegram user={user_id} step={step!r} text={text[:50]!r}")
 
-    # 記錄使用者（非同步，失敗不影響主流程）
+    # 記錄使用者
     try:
         upsert_telegram_user(
             user_id,
@@ -326,6 +546,7 @@ async def handle_message(update: Update, context) -> None:
 
     # 中文快速指令
     if text in {"訂閱", "設定條件", "設定訂閱"}:
+        _conv[user_id] = {"step": "setup_location", "pending": {}}
         await _ask_location(user_id, chat_id, context.bot)
         return
     if text in {"我的訂閱", "查看訂閱"}:
@@ -338,14 +559,29 @@ async def handle_message(update: Update, context) -> None:
         await cmd_help(update, context)
         return
 
-    # 訂閱設定步驟：等待關鍵字輸入
-    if step == "setup_keyword":
+    # 職等輸入步驟
+    if step == "setup_rank_grade":
+        lo, hi = _parse_grade_range(text)
+        _conv[user_id].setdefault("pending", {}).update({
+            "rank_grade_min": lo,
+            "rank_grade_max": hi,
+        })
+        grade_str = f"{lo}-{hi}職等" if lo != hi else (f"{lo}職等" if lo else "不限")
+        await update.message.reply_text(f"📊 職等：{grade_str} ✓")
+        await _ask_keywords(user_id, chat_id, context.bot)
+        return
+
+    # 關鍵字輸入步驟
+    if step == "setup_keywords":
         await _save_and_confirm(user_id, text, chat_id, context.bot)
         return
 
-    # 預設：以訂閱條件查詢
-    result = handle_user_query("telegram", str(user_id))
-    await update.message.reply_text(result)
+    # 預設：以訂閱條件查詢（Telegram 使用 HTML parse_mode）
+    result, parse_mode = handle_user_query("telegram", str(user_id))
+    if parse_mode == "HTML":
+        await update.message.reply_text(result, parse_mode="HTML")
+    else:
+        await update.message.reply_text(result)
 
 
 # ── Application 管理 ──────────────────────────────────────────────────────────

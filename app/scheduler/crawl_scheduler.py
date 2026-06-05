@@ -1,16 +1,16 @@
 """
-每日職缺爬取排程（v3）。
+每日職缺爬取排程（v3.1）。
 
 排程方式：
   1. APScheduler AsyncIOScheduler：伺服器持續運行時在 02:00 台灣時間自動觸發。
   2. /admin/trigger-crawl 端點：由 cron-job.org 每日打一次，解決 Render free tier
      15 分鐘無流量後 spin down 導致 APScheduler 不執行的問題。
 
-爬取流程：
-  1. 無篩選條件，抓取全部職缺列表頁（max_pages=0 = 不限）
-  2. 針對每筆職缺抓取詳細頁（fetch_detail=True）
-  3. UPSERT 到 jobs 資料表
-  4. 刪除截止日已過的舊職缺
+爬取流程（v3.1）：
+  1. 固定 is_office=True（只爬「須具公務人員任用資格」職缺）
+  2. 抓取全部職缺列表頁（max_pages=0 = 不限）+ 詳細頁
+  3. 整批 UPSERT 到 jobs 資料表
+  4. 整批完成後一次性刪除截止日已過的職缺
 """
 import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -35,6 +35,7 @@ async def daily_crawl_task() -> int:
         jobs = await loop.run_in_executor(
             None,
             lambda: crawl_jobs(
+                is_office=True,          # v3.1: 固定只爬公務人員資格職缺
                 fetch_detail=True,
                 max_pages=MAX_CRAWL_PAGES_SCHEDULED,
                 lookback_days=30,

@@ -1,12 +1,14 @@
 """
-行政院人事行政總處事求人機關徵才系統 爬蟲（v3）
+行政院人事行政總處事求人機關徵才系統 爬蟲（v3.1）
 目標：https://web3.dgpa.gov.tw/want03front/AP/WANTF00001.ASPX
 網站類型：ASP.NET WebForms，需攜帶 __VIEWSTATE 跨頁 POST（無 __EVENTVALIDATION）。
 
-v3 新增：
-  - fetch_detail 參數：排程爬取時設 True，抓取每筆職缺的詳細頁
-  - 新 DGPA 表單欄位：chkTYPE1-4（官等）、IS_OFFICE/IS_NOT_OFFICE（職缺類別）
-  - Job 物件包含完整欄位（合併列表頁 + 詳細頁）
+v3.1 改動：
+  - 排程爬取固定 is_office=True（須具公務人員任用資格）
+  - 新增 _parse_rank_grades()、_derive_rank_type_codes()
+  - 日期統一為 YYYY-MM-DD（deadline_start + deadline_end）
+  - 新增 search_text 計算欄位
+  - 移除 person_kind、contact_method、apply_method
 """
 import re
 import time
@@ -20,7 +22,6 @@ from bs4 import BeautifulSoup
 from app.crawler.form_options import (
     code_to_sysnam_grp,
     get_form_options,
-    get_sysnam_names_for_grp,
     text_to_code,
 )
 from app.models.job import Job
@@ -58,13 +59,12 @@ def _roc_days_ago(days: int) -> str:
 
 def _roc_to_iso(roc: str) -> str:
     """
-    民國年日期字串 → ISO 格式。
+    將單一民國年日期字串轉為 ISO YYYY-MM-DD。
     '115/06/03' → '2026-06-03'
-    '115/05/30~115/06/03' → 取截止日 '2026-06-03'
+    若格式不符則回傳 ''。
     """
-    # 若是範圍，取後半段截止日
-    s = roc.split("~")[-1].strip()
-    parts = s.replace(" ", "").split("/")
+    s = roc.strip().replace(" ", "")
+    parts = s.split("/")
     if len(parts) == 3:
         try:
             year = int(parts[0]) + 1911
@@ -72,6 +72,57 @@ def _roc_to_iso(roc: str) -> str:
         except (ValueError, IndexError):
             pass
     return ""
+
+
+def _parse_deadline_range(deadline_raw: str) -> tuple[str, str]:
+    """
+    解析列表頁截止日範圍字串，回傳 (deadline_start, deadline_end) ISO 格式。
+    '115/05/30~115/06/03' → ('2026-05-30', '2026-06-03')
+    '115/06/03' → ('', '2026-06-03')
+    """
+    s = deadline_raw.strip()
+    if "~" in s:
+        parts = s.split("~", 1)
+        return (_roc_to_iso(parts[0].strip()), _roc_to_iso(parts[1].strip()))
+    return ("", _roc_to_iso(s))
+
+
+# ── Rank 解析工具 ──────────────────────────────────────────────────────────────
+
+def _parse_rank_grades(rank_text: str) -> tuple[int, int]:
+    """
+    從官等文字提取最低/最高職等。
+    '薦任第6至第9職等'               → (6, 9)
+    '委任第5職等或薦任第6職等至薦任第7職等' → (5, 7)
+    '簡任第10職等'                    → (10, 10)
+    '不分官等' / '' / 無法解析         → (0, 0)
+
+    使用 regex 同時匹配「第N職等」與「第N至」兩種格式。
+    """
+    nums = [int(n) for n in re.findall(r"第(\d+)(?:職等|至|～|~)", rank_text)]
+    if not nums:
+        return (0, 0)
+    return (min(nums), max(nums))
+
+
+def _derive_rank_type_codes(rank_text: str) -> str:
+    """
+    從官等文字推算代碼（逗號分隔）。
+    代碼：1=簡任/簡派, 2=薦任/薦派, 3=委任/委派, 4=其他（無法識別）
+    '薦任第6職等'            → '2'
+    '委任第5職等或薦任第6職等' → '3,2'
+    '不分官等'               → '4'
+    """
+    codes: list[str] = []
+    if "簡任" in rank_text or "簡派" in rank_text:
+        codes.append("1")
+    if "薦任" in rank_text or "薦派" in rank_text:
+        codes.append("2")
+    if "委任" in rank_text or "委派" in rank_text:
+        codes.append("3")
+    if not codes and rank_text.strip():
+        codes.append("4")
+    return ",".join(codes)
 
 
 # ── ASP.NET Form 工具 ─────────────────────────────────────────────────────────
@@ -206,18 +257,13 @@ def fetch_job_detail(session: requests.Session, url: str) -> dict:
     已驗證的 element ID（2026-05）：
         PLTITLE          職稱
         PLORG_NAME       機關名稱
-        PLPERSON_KIND    人員區分
         PLWORK_PLACE_TYPE 工作地點（帶代碼前綴）
         PLRANK           官等
         PLSYSNAM         職系
-        PLDATE_FROM_TO   徵才期間
+        PLDATE_FROM_TO   徵才期間（格式：起始日~截止日，民國年）
         PLWORK_ITEM      工作說明
         PLWORK_QUALITY   應徵條件
         PLWORK_ADDRESS   工作地址
-        PLCONTACT_METHOD 聯絡方式
-        V_Work_Type      應徵方式
-
-    TODO: 正取/候補名額的 element ID 尚未確認。
     """
     if not url:
         return {}
@@ -232,24 +278,17 @@ def fetch_job_detail(session: requests.Session, url: str) -> dict:
             return tag.get_text(" ", strip=True) if tag else ""
 
         date_range = by_id("PLDATE_FROM_TO")
-        parts = date_range.split("~")
-        publish_date = parts[0].strip() if parts else ""
-        deadline_raw = parts[-1].strip() if len(parts) > 1 else date_range.strip()
 
         return {
-            "title":        by_id("PLTITLE"),
-            "org_name":     by_id("PLORG_NAME"),
-            "person_kind":  by_id("PLPERSON_KIND"),
-            "location":     by_id("PLWORK_PLACE_TYPE"),
-            "rank_type":    by_id("PLRANK"),
-            "job_series":   by_id("PLSYSNAM"),
-            "work_items":   by_id("PLWORK_ITEM"),
+            "title":          by_id("PLTITLE"),
+            "org_name":       by_id("PLORG_NAME"),
+            "location":       by_id("PLWORK_PLACE_TYPE"),
+            "rank_type":      by_id("PLRANK"),
+            "job_series":     by_id("PLSYSNAM"),
+            "work_items":     by_id("PLWORK_ITEM"),
             "qualifications": by_id("PLWORK_QUALITY"),
-            "work_address": by_id("PLWORK_ADDRESS"),
-            "contact_method": by_id("PLCONTACT_METHOD"),
-            "apply_method": by_id("V_Work_Type"),
-            "publish_date": publish_date,
-            "deadline_raw": deadline_raw,
+            "work_address":   by_id("PLWORK_ADDRESS"),
+            "date_range":     date_range,   # 'YYY/MM/DD~YYY/MM/DD'
         }
     except Exception as e:
         logger.warning(f"詳細頁抓取失敗 {url}: {e}")
@@ -288,36 +327,55 @@ def _build_job(raw: dict, detail: dict | None = None) -> Job:
     sysnam_code = text_to_code("sysnam", job_series)
     sysnam_grp  = code_to_sysnam_grp(sysnam_code)
 
-    # 人員區分：只有詳細頁有
-    person_kind = d.get("person_kind", "")
-    person_kind_code = text_to_code("person_kind", person_kind)
+    # 官等：優先詳細頁
+    rank_type = d.get("rank_type") or raw.get("rank_type", "")
+    rank_type_codes = _derive_rank_type_codes(rank_type)
+    rank_grade_min, rank_grade_max = _parse_rank_grades(rank_type)
 
-    # 截止日：列表頁是 "115/05/30~115/06/03"，取後半段
+    # 日期：列表頁是 "115/05/30~115/06/03"
     deadline_str = raw.get("deadline", "")
-    deadline_end_iso = _roc_to_iso(deadline_str)
+    deadline_start, deadline_end = _parse_deadline_range(deadline_str)
+
+    # 若詳細頁有 date_range，覆蓋
+    if d.get("date_range"):
+        ds, de = _parse_deadline_range(d["date_range"])
+        if ds:
+            deadline_start = ds
+        if de:
+            deadline_end = de
+
+    # publish_date：目前從 date_range 起始日取，無法取得時用爬取當天
+    publish_date = deadline_start  # 大部分職缺 start = 公告日
+
+    # 全文搜尋欄位
+    qualifications = d.get("qualifications", "")
+    work_items = d.get("work_items", "")
+    title = d.get("title") or raw.get("title", "")
+    org_name = d.get("org_name") or raw.get("org_name", "")
+    search_text = " ".join(filter(None, [title, org_name, qualifications, work_items]))
 
     return Job(
-        job_id           = raw["job_id"],
-        title            = d.get("title") or raw.get("title", ""),
-        org_name         = d.get("org_name") or raw.get("org_name", ""),
-        work_place       = work_place,
-        work_place_code  = work_place_code,
-        person_kind      = person_kind,
-        person_kind_code = person_kind_code,
-        rank_type        = d.get("rank_type") or raw.get("rank_type", ""),
-        job_series       = job_series,
-        sysnam_grp       = sysnam_grp,
-        regular_slots    = 0,     # TODO: 待確認 DGPA element ID
-        alternate_slots  = 0,     # TODO: 待確認 DGPA element ID
-        qualifications   = d.get("qualifications", ""),
-        work_items       = d.get("work_items", ""),
-        work_address     = d.get("work_address", ""),
-        contact_method   = d.get("contact_method", ""),
-        apply_method     = d.get("apply_method", ""),
-        publish_date     = d.get("publish_date", ""),
-        deadline         = deadline_str,
-        deadline_end_iso = deadline_end_iso,
-        job_url          = raw.get("job_url", ""),
+        job_id          = raw["job_id"],
+        title           = title,
+        org_name        = org_name,
+        work_place      = work_place,
+        work_place_code = work_place_code,
+        rank_type       = rank_type,
+        rank_type_codes = rank_type_codes,
+        rank_grade_min  = rank_grade_min,
+        rank_grade_max  = rank_grade_max,
+        job_series      = job_series,
+        sysnam_grp      = sysnam_grp,
+        regular_slots   = 0,     # TODO: 待確認 DGPA element ID
+        alternate_slots = 0,     # TODO: 待確認 DGPA element ID
+        qualifications  = qualifications,
+        work_items      = work_items,
+        work_address    = d.get("work_address", ""),
+        publish_date    = publish_date,
+        deadline_start  = deadline_start,
+        deadline_end    = deadline_end,
+        job_url         = raw.get("job_url", ""),
+        search_text     = search_text,
     )
 
 
@@ -329,7 +387,7 @@ def crawl_jobs(
     sysnam_grp: str = "",
     sysnam: str = "",
     chk_types: list[str] | None = None,
-    is_office: bool | None = None,
+    is_office: bool | None = True,   # v3.1: 預設固定 True（須具公務人員資格）
     title_keyword: str = "",
     org_keyword: str = "",
     lookback_days: int = 30,
@@ -345,9 +403,9 @@ def crawl_jobs(
         sysnam_grp:    drpSYSNAM_grp 值：'' / 'A'（行政類）/ 'B'（技術類）
         sysnam:        drpSYSNAM 值（空字串 = 全部職系）
         chk_types:     官等 checkbox 清單，e.g. ['1','2'] = 簡任+薦任
-        is_office:     True=須具資格 / False=不具資格 / None=不限
-        title_keyword: 職缺名稱關鍵字
-        org_keyword:   機關名稱關鍵字
+        is_office:     True=須具資格（預設）/ False=不具資格 / None=不限
+        title_keyword: 職缺名稱關鍵字（只用於爬蟲 filter，不用於 DB 搜尋）
+        org_keyword:   機關名稱關鍵字（只用於爬蟲 filter）
         lookback_days: 查詢幾天內的職缺（預設 30 天）
         max_pages:     最多爬幾頁（0 = 不限）
         fetch_detail:  是否同時抓取詳細頁（排程爬取時用）
@@ -356,8 +414,8 @@ def crawl_jobs(
     date_to   = _roc_today()
     date_from = _roc_days_ago(lookback_days)
     logger.info(
-        f"爬蟲啟動 | 地點={work_place!r} 人員={person_kind!r} "
-        f"職系={sysnam_grp!r} 關鍵字={title_keyword!r} fetch_detail={fetch_detail}"
+        f"爬蟲啟動 | 地點={work_place!r} 職系={sysnam_grp!r} "
+        f"is_office={is_office} fetch_detail={fetch_detail}"
     )
 
     # Step 1：GET 初始頁取得 VIEWSTATE

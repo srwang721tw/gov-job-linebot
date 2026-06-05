@@ -1,5 +1,5 @@
 """
-資料庫抽象層（v3）：支援兩個後端
+資料庫抽象層（v3.1）：支援兩個後端
   - 本機開發：SQLite（無需設定 DATABASE_URL）
   - 正式環境：Neon PostgreSQL（設定 DATABASE_URL 環境變數）
 
@@ -9,8 +9,11 @@
   subscription  使用者訂閱條件（LINE + Telegram 共用）
   jobs          每日爬取的政府職缺資料（含詳細頁）
 
-SQL 語法差異由 _run() 及各 SQL 字串自動處理。
+v3.1 主要變更：
+  subscription: 多地點/多官等/職務列等/職系細項/多關鍵字
+  jobs: 統一日期為 YYYY-MM-DD，新增 rank_grade_min/max、rank_type_codes、search_text
 """
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -62,6 +65,132 @@ CREATE TABLE IF NOT EXISTS telegram_user (
 )
 """
 
+# v3.1 subscription：多地點/多官等/職務列等/職系細項/關鍵字
+_CREATE_SUBSCRIPTION_PG = """
+CREATE TABLE IF NOT EXISTS subscription (
+    id               SERIAL PRIMARY KEY,
+    platform         VARCHAR(10)  NOT NULL,
+    platform_user_id VARCHAR(50)  NOT NULL,
+    work_place_codes TEXT         DEFAULT '',
+    work_place_names TEXT         DEFAULT '',
+    rank_types       TEXT         DEFAULT '',
+    rank_grade_min   INTEGER      DEFAULT 0,
+    rank_grade_max   INTEGER      DEFAULT 0,
+    sysnam_grp       VARCHAR(5)   DEFAULT '',
+    sysnam_grp_name  VARCHAR(20)  DEFAULT '',
+    sysnam_names     TEXT         DEFAULT '',
+    keywords         TEXT         DEFAULT '',
+    updated_at       TIMESTAMPTZ  DEFAULT NOW(),
+    UNIQUE(platform, platform_user_id)
+)
+"""
+
+_CREATE_SUBSCRIPTION_SQLITE = """
+CREATE TABLE IF NOT EXISTS subscription (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    platform         TEXT NOT NULL,
+    platform_user_id TEXT NOT NULL,
+    work_place_codes TEXT DEFAULT '',
+    work_place_names TEXT DEFAULT '',
+    rank_types       TEXT DEFAULT '',
+    rank_grade_min   INTEGER DEFAULT 0,
+    rank_grade_max   INTEGER DEFAULT 0,
+    sysnam_grp       TEXT DEFAULT '',
+    sysnam_grp_name  TEXT DEFAULT '',
+    sysnam_names     TEXT DEFAULT '',
+    keywords         TEXT DEFAULT '',
+    updated_at       TEXT,
+    UNIQUE(platform, platform_user_id)
+)
+"""
+
+# v3.1 jobs：統一日期 YYYY-MM-DD，新增 rank 欄位與 search_text
+_CREATE_JOBS_PG = """
+CREATE TABLE IF NOT EXISTS jobs (
+    id               SERIAL PRIMARY KEY,
+    job_id           VARCHAR(100) UNIQUE NOT NULL,
+    title            VARCHAR(200) DEFAULT '',
+    org_name         VARCHAR(200) DEFAULT '',
+    work_place       VARCHAR(100) DEFAULT '',
+    work_place_code  VARCHAR(10)  DEFAULT '',
+    rank_type        TEXT         DEFAULT '',
+    rank_type_codes  TEXT         DEFAULT '',
+    rank_grade_min   INTEGER      DEFAULT 0,
+    rank_grade_max   INTEGER      DEFAULT 0,
+    job_series       VARCHAR(100) DEFAULT '',
+    sysnam_grp       VARCHAR(5)   DEFAULT '',
+    regular_slots    INTEGER      DEFAULT 0,
+    alternate_slots  INTEGER      DEFAULT 0,
+    qualifications   TEXT         DEFAULT '',
+    work_items       TEXT         DEFAULT '',
+    work_address     TEXT         DEFAULT '',
+    publish_date     VARCHAR(10)  DEFAULT '',
+    deadline_start   VARCHAR(10)  DEFAULT '',
+    deadline_end     VARCHAR(10)  DEFAULT '',
+    job_url          VARCHAR(500) DEFAULT '',
+    search_text      TEXT         DEFAULT '',
+    crawled_at       TIMESTAMPTZ  DEFAULT NOW()
+)
+"""
+
+_CREATE_JOBS_SQLITE = """
+CREATE TABLE IF NOT EXISTS jobs (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id           TEXT UNIQUE NOT NULL,
+    title            TEXT DEFAULT '',
+    org_name         TEXT DEFAULT '',
+    work_place       TEXT DEFAULT '',
+    work_place_code  TEXT DEFAULT '',
+    rank_type        TEXT DEFAULT '',
+    rank_type_codes  TEXT DEFAULT '',
+    rank_grade_min   INTEGER DEFAULT 0,
+    rank_grade_max   INTEGER DEFAULT 0,
+    job_series       TEXT DEFAULT '',
+    sysnam_grp       TEXT DEFAULT '',
+    regular_slots    INTEGER DEFAULT 0,
+    alternate_slots  INTEGER DEFAULT 0,
+    qualifications   TEXT DEFAULT '',
+    work_items       TEXT DEFAULT '',
+    work_address     TEXT DEFAULT '',
+    publish_date     TEXT DEFAULT '',
+    deadline_start   TEXT DEFAULT '',
+    deadline_end     TEXT DEFAULT '',
+    job_url          TEXT DEFAULT '',
+    search_text      TEXT DEFAULT '',
+    crawled_at       TEXT DEFAULT (datetime('now'))
+)
+"""
+
+_CREATE_JOBS_IDX = [
+    "CREATE INDEX IF NOT EXISTS idx_jobs_work_place_code ON jobs(work_place_code)",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_sysnam_grp      ON jobs(sysnam_grp)",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_deadline_end    ON jobs(deadline_end)",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_rank_grade_min  ON jobs(rank_grade_min)",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_rank_grade_max  ON jobs(rank_grade_max)",
+]
+
+# Migration：為已存在的舊表新增欄位（IF NOT EXISTS，安全執行）
+_ALTER_SUBSCRIPTION = [
+    "ALTER TABLE subscription ADD COLUMN IF NOT EXISTS work_place_codes TEXT DEFAULT ''",
+    "ALTER TABLE subscription ADD COLUMN IF NOT EXISTS work_place_names TEXT DEFAULT ''",
+    "ALTER TABLE subscription ADD COLUMN IF NOT EXISTS rank_types       TEXT DEFAULT ''",
+    "ALTER TABLE subscription ADD COLUMN IF NOT EXISTS rank_grade_min   INTEGER DEFAULT 0",
+    "ALTER TABLE subscription ADD COLUMN IF NOT EXISTS rank_grade_max   INTEGER DEFAULT 0",
+    "ALTER TABLE subscription ADD COLUMN IF NOT EXISTS sysnam_names     TEXT DEFAULT ''",
+    "ALTER TABLE subscription ADD COLUMN IF NOT EXISTS keywords         TEXT DEFAULT ''",
+]
+
+_ALTER_JOBS = [
+    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS rank_type_codes TEXT DEFAULT ''",
+    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS rank_grade_min  INTEGER DEFAULT 0",
+    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS rank_grade_max  INTEGER DEFAULT 0",
+    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS deadline_start  VARCHAR(10) DEFAULT ''",
+    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS deadline_end    VARCHAR(10) DEFAULT ''",
+    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS search_text     TEXT DEFAULT ''",
+]
+
+# ── UPSERT SQL ────────────────────────────────────────────────────────────────
+
 _UPSERT_LINE_USER = """
 INSERT INTO line_user (line_user_id, display_name, updated_at)
 VALUES (?, ?, ?)
@@ -79,154 +208,59 @@ ON CONFLICT(telegram_user_id) DO UPDATE SET
     updated_at = EXCLUDED.updated_at
 """
 
-_CREATE_SUBSCRIPTION_PG = """
-CREATE TABLE IF NOT EXISTS subscription (
-    id               SERIAL PRIMARY KEY,
-    platform         VARCHAR(10)  NOT NULL,
-    platform_user_id VARCHAR(50)  NOT NULL,
-    work_place_code  VARCHAR(10)  DEFAULT '',
-    work_place_name  VARCHAR(50)  DEFAULT '',
-    person_kind_code VARCHAR(10)  DEFAULT '',
-    person_kind_name VARCHAR(50)  DEFAULT '',
-    sysnam_grp       VARCHAR(5)   DEFAULT '',
-    sysnam_grp_name  VARCHAR(20)  DEFAULT '',
-    title_keyword    VARCHAR(100) DEFAULT '',
-    org_keyword      VARCHAR(100) DEFAULT '',
-    updated_at       TIMESTAMPTZ  DEFAULT NOW(),
-    UNIQUE(platform, platform_user_id)
-)
-"""
-
-_CREATE_SUBSCRIPTION_SQLITE = """
-CREATE TABLE IF NOT EXISTS subscription (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    platform         TEXT NOT NULL,
-    platform_user_id TEXT NOT NULL,
-    work_place_code  TEXT DEFAULT '',
-    work_place_name  TEXT DEFAULT '',
-    person_kind_code TEXT DEFAULT '',
-    person_kind_name TEXT DEFAULT '',
-    sysnam_grp       TEXT DEFAULT '',
-    sysnam_grp_name  TEXT DEFAULT '',
-    title_keyword    TEXT DEFAULT '',
-    org_keyword      TEXT DEFAULT '',
-    updated_at       TEXT,
-    UNIQUE(platform, platform_user_id)
-)
-"""
-
-_CREATE_JOBS_PG = """
-CREATE TABLE IF NOT EXISTS jobs (
-    id               SERIAL PRIMARY KEY,
-    job_id           VARCHAR(100) UNIQUE NOT NULL,
-    title            VARCHAR(200) DEFAULT '',
-    org_name         VARCHAR(200) DEFAULT '',
-    work_place       VARCHAR(100) DEFAULT '',
-    work_place_code  VARCHAR(10)  DEFAULT '',
-    person_kind      VARCHAR(50)  DEFAULT '',
-    person_kind_code VARCHAR(10)  DEFAULT '',
-    rank_type        VARCHAR(50)  DEFAULT '',
-    job_series       VARCHAR(50)  DEFAULT '',
-    sysnam_grp       VARCHAR(5)   DEFAULT '',
-    regular_slots    INTEGER      DEFAULT 0,
-    alternate_slots  INTEGER      DEFAULT 0,
-    qualifications   TEXT         DEFAULT '',
-    work_items       TEXT         DEFAULT '',
-    work_address     VARCHAR(300) DEFAULT '',
-    contact_method   VARCHAR(300) DEFAULT '',
-    apply_method     VARCHAR(200) DEFAULT '',
-    publish_date     VARCHAR(20)  DEFAULT '',
-    deadline         VARCHAR(50)  DEFAULT '',
-    deadline_end_iso VARCHAR(10)  DEFAULT '',
-    job_url          VARCHAR(500) DEFAULT '',
-    crawled_at       TIMESTAMPTZ  DEFAULT NOW()
-)
-"""
-
-_CREATE_JOBS_SQLITE = """
-CREATE TABLE IF NOT EXISTS jobs (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id           TEXT UNIQUE NOT NULL,
-    title            TEXT DEFAULT '',
-    org_name         TEXT DEFAULT '',
-    work_place       TEXT DEFAULT '',
-    work_place_code  TEXT DEFAULT '',
-    person_kind      TEXT DEFAULT '',
-    person_kind_code TEXT DEFAULT '',
-    rank_type        TEXT DEFAULT '',
-    job_series       TEXT DEFAULT '',
-    sysnam_grp       TEXT DEFAULT '',
-    regular_slots    INTEGER DEFAULT 0,
-    alternate_slots  INTEGER DEFAULT 0,
-    qualifications   TEXT DEFAULT '',
-    work_items       TEXT DEFAULT '',
-    work_address     TEXT DEFAULT '',
-    contact_method   TEXT DEFAULT '',
-    apply_method     TEXT DEFAULT '',
-    publish_date     TEXT DEFAULT '',
-    deadline         TEXT DEFAULT '',
-    deadline_end_iso TEXT DEFAULT '',
-    job_url          TEXT DEFAULT '',
-    crawled_at       TEXT DEFAULT (datetime('now'))
-)
-"""
-
-_CREATE_JOBS_IDX = [
-    "CREATE INDEX IF NOT EXISTS idx_jobs_work_place_code ON jobs(work_place_code)",
-    "CREATE INDEX IF NOT EXISTS idx_jobs_person_kind_code ON jobs(person_kind_code)",
-    "CREATE INDEX IF NOT EXISTS idx_jobs_sysnam_grp ON jobs(sysnam_grp)",
-    "CREATE INDEX IF NOT EXISTS idx_jobs_deadline_end ON jobs(deadline_end_iso)",
-]
-
 _UPSERT_SUBSCRIPTION = """
 INSERT INTO subscription
-    (platform, platform_user_id, work_place_code, work_place_name,
-     person_kind_code, person_kind_name,
-     sysnam_grp, sysnam_grp_name,
-     title_keyword, org_keyword, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (platform, platform_user_id,
+     work_place_codes, work_place_names,
+     rank_types, rank_grade_min, rank_grade_max,
+     sysnam_grp, sysnam_grp_name, sysnam_names,
+     keywords, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(platform, platform_user_id) DO UPDATE SET
-    work_place_code  = EXCLUDED.work_place_code,
-    work_place_name  = EXCLUDED.work_place_name,
-    person_kind_code = EXCLUDED.person_kind_code,
-    person_kind_name = EXCLUDED.person_kind_name,
+    work_place_codes = EXCLUDED.work_place_codes,
+    work_place_names = EXCLUDED.work_place_names,
+    rank_types       = EXCLUDED.rank_types,
+    rank_grade_min   = EXCLUDED.rank_grade_min,
+    rank_grade_max   = EXCLUDED.rank_grade_max,
     sysnam_grp       = EXCLUDED.sysnam_grp,
     sysnam_grp_name  = EXCLUDED.sysnam_grp_name,
-    title_keyword    = EXCLUDED.title_keyword,
-    org_keyword      = EXCLUDED.org_keyword,
+    sysnam_names     = EXCLUDED.sysnam_names,
+    keywords         = EXCLUDED.keywords,
     updated_at       = EXCLUDED.updated_at
 """
 
 _UPSERT_JOB = """
 INSERT INTO jobs
     (job_id, title, org_name, work_place, work_place_code,
-     person_kind, person_kind_code, rank_type, job_series, sysnam_grp,
-     regular_slots, alternate_slots, qualifications, work_items,
-     work_address, contact_method, apply_method,
-     publish_date, deadline, deadline_end_iso, job_url, crawled_at)
+     rank_type, rank_type_codes, rank_grade_min, rank_grade_max,
+     job_series, sysnam_grp,
+     regular_slots, alternate_slots,
+     qualifications, work_items, work_address,
+     publish_date, deadline_start, deadline_end,
+     job_url, search_text, crawled_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(job_id) DO UPDATE SET
-    title            = EXCLUDED.title,
-    org_name         = EXCLUDED.org_name,
-    work_place       = EXCLUDED.work_place,
-    work_place_code  = EXCLUDED.work_place_code,
-    rank_type        = EXCLUDED.rank_type,
-    job_series       = EXCLUDED.job_series,
-    sysnam_grp       = EXCLUDED.sysnam_grp,
-    deadline         = EXCLUDED.deadline,
-    deadline_end_iso = EXCLUDED.deadline_end_iso,
-    job_url          = EXCLUDED.job_url,
-    crawled_at       = EXCLUDED.crawled_at,
-    person_kind      = CASE WHEN EXCLUDED.person_kind      != '' THEN EXCLUDED.person_kind      ELSE jobs.person_kind      END,
-    person_kind_code = CASE WHEN EXCLUDED.person_kind_code != '' THEN EXCLUDED.person_kind_code ELSE jobs.person_kind_code END,
-    qualifications   = CASE WHEN EXCLUDED.qualifications   != '' THEN EXCLUDED.qualifications   ELSE jobs.qualifications   END,
-    work_items       = CASE WHEN EXCLUDED.work_items       != '' THEN EXCLUDED.work_items       ELSE jobs.work_items       END,
-    work_address     = CASE WHEN EXCLUDED.work_address     != '' THEN EXCLUDED.work_address     ELSE jobs.work_address     END,
-    contact_method   = CASE WHEN EXCLUDED.contact_method   != '' THEN EXCLUDED.contact_method   ELSE jobs.contact_method   END,
-    apply_method     = CASE WHEN EXCLUDED.apply_method     != '' THEN EXCLUDED.apply_method     ELSE jobs.apply_method     END,
-    publish_date     = CASE WHEN EXCLUDED.publish_date     != '' THEN EXCLUDED.publish_date     ELSE jobs.publish_date     END,
-    regular_slots    = CASE WHEN EXCLUDED.regular_slots    != 0  THEN EXCLUDED.regular_slots    ELSE jobs.regular_slots    END,
-    alternate_slots  = CASE WHEN EXCLUDED.alternate_slots  != 0  THEN EXCLUDED.alternate_slots  ELSE jobs.alternate_slots  END
+    title           = EXCLUDED.title,
+    org_name        = EXCLUDED.org_name,
+    work_place      = EXCLUDED.work_place,
+    work_place_code = EXCLUDED.work_place_code,
+    rank_type       = EXCLUDED.rank_type,
+    rank_type_codes = EXCLUDED.rank_type_codes,
+    rank_grade_min  = EXCLUDED.rank_grade_min,
+    rank_grade_max  = EXCLUDED.rank_grade_max,
+    job_series      = EXCLUDED.job_series,
+    sysnam_grp      = EXCLUDED.sysnam_grp,
+    deadline_start  = EXCLUDED.deadline_start,
+    deadline_end    = EXCLUDED.deadline_end,
+    job_url         = EXCLUDED.job_url,
+    crawled_at      = EXCLUDED.crawled_at,
+    qualifications  = CASE WHEN EXCLUDED.qualifications != '' THEN EXCLUDED.qualifications ELSE jobs.qualifications END,
+    work_items      = CASE WHEN EXCLUDED.work_items     != '' THEN EXCLUDED.work_items     ELSE jobs.work_items     END,
+    work_address    = CASE WHEN EXCLUDED.work_address   != '' THEN EXCLUDED.work_address   ELSE jobs.work_address   END,
+    publish_date    = CASE WHEN EXCLUDED.publish_date   != '' THEN EXCLUDED.publish_date   ELSE jobs.publish_date   END,
+    regular_slots   = CASE WHEN EXCLUDED.regular_slots  != 0  THEN EXCLUDED.regular_slots  ELSE jobs.regular_slots  END,
+    alternate_slots = CASE WHEN EXCLUDED.alternate_slots!= 0  THEN EXCLUDED.alternate_slots ELSE jobs.alternate_slots END,
+    search_text     = CASE WHEN EXCLUDED.search_text    != '' THEN EXCLUDED.search_text    ELSE jobs.search_text    END
 """
 
 
@@ -266,14 +300,14 @@ def _run(conn, sql: str, params: tuple = ()):
 
 def init_db() -> None:
     if _IS_POSTGRES:
-        stmts = [
+        create_stmts = [
             _CREATE_LINE_USER_PG,
             _CREATE_TELEGRAM_USER_PG,
             _CREATE_SUBSCRIPTION_PG,
             _CREATE_JOBS_PG,
         ]
     else:
-        stmts = [
+        create_stmts = [
             _CREATE_LINE_USER_SQLITE,
             _CREATE_TELEGRAM_USER_SQLITE,
             _CREATE_SUBSCRIPTION_SQLITE,
@@ -281,12 +315,34 @@ def init_db() -> None:
         ]
 
     with get_conn() as conn:
-        for sql in stmts:
+        for sql in create_stmts:
             _run(conn, sql)
         for idx_sql in _CREATE_JOBS_IDX:
             _run(conn, idx_sql)
         if _IS_POSTGRES:
             _run(conn, "CREATE EXTENSION IF NOT EXISTS pg_trgm")
+            # 為 search_text 建立 GIN 索引（已存在則略過）
+            _run(conn, """
+                DO $$ BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_indexes
+                        WHERE tablename='jobs' AND indexname='idx_jobs_search_text'
+                    ) THEN
+                        CREATE INDEX idx_jobs_search_text ON jobs USING gin(search_text gin_trgm_ops);
+                    END IF;
+                END $$
+            """)
+            # Migration：為舊表新增欄位
+            for sql in _ALTER_SUBSCRIPTION:
+                try:
+                    _run(conn, sql)
+                except Exception as e:
+                    logger.debug(f"ALTER subscription 略過（可能已存在）: {e}")
+            for sql in _ALTER_JOBS:
+                try:
+                    _run(conn, sql)
+                except Exception as e:
+                    logger.debug(f"ALTER jobs 略過（可能已存在）: {e}")
 
     backend = "PostgreSQL (Neon)" if _IS_POSTGRES else "SQLite"
     logger.info(f"資料庫初始化完成（{backend}）")
@@ -319,11 +375,10 @@ def save_subscription(sub: Subscription) -> None:
     with get_conn() as conn:
         _run(conn, _UPSERT_SUBSCRIPTION, (
             sub.platform, sub.platform_user_id,
-            sub.work_place_code, sub.work_place_name,
-            sub.person_kind_code, sub.person_kind_name,
-            sub.sysnam_grp, sub.sysnam_grp_name,
-            sub.title_keyword, sub.org_keyword,
-            now,
+            sub.work_place_codes, sub.work_place_names,
+            sub.rank_types, sub.rank_grade_min, sub.rank_grade_max,
+            sub.sysnam_grp, sub.sysnam_grp_name, sub.sysnam_names,
+            sub.keywords, now,
         ))
     logger.info(f"訂閱已儲存：{sub.platform}:{sub.platform_user_id[:8]}...")
 
@@ -339,16 +394,17 @@ def get_subscription(platform: str, platform_user_id: str) -> Subscription | Non
         return None
     d = dict(row)
     return Subscription(
-        platform         = d["platform"],
-        platform_user_id = d["platform_user_id"],
-        work_place_code  = d.get("work_place_code", ""),
-        work_place_name  = d.get("work_place_name", ""),
-        person_kind_code = d.get("person_kind_code", ""),
-        person_kind_name = d.get("person_kind_name", ""),
-        sysnam_grp       = d.get("sysnam_grp", ""),
-        sysnam_grp_name  = d.get("sysnam_grp_name", ""),
-        title_keyword    = d.get("title_keyword", ""),
-        org_keyword      = d.get("org_keyword", ""),
+        platform          = d["platform"],
+        platform_user_id  = d["platform_user_id"],
+        work_place_codes  = d.get("work_place_codes", "") or "",
+        work_place_names  = d.get("work_place_names", "") or "",
+        rank_types        = d.get("rank_types", "") or "",
+        rank_grade_min    = d.get("rank_grade_min", 0) or 0,
+        rank_grade_max    = d.get("rank_grade_max", 0) or 0,
+        sysnam_grp        = d.get("sysnam_grp", "") or "",
+        sysnam_grp_name   = d.get("sysnam_grp_name", "") or "",
+        sysnam_names      = d.get("sysnam_names", "") or "",
+        keywords          = d.get("keywords", "") or "",
     )
 
 
@@ -378,13 +434,13 @@ def upsert_job(job: Job) -> None:
         _run(conn, _UPSERT_JOB, (
             job.job_id, job.title, job.org_name,
             job.work_place, job.work_place_code,
-            job.person_kind, job.person_kind_code,
-            job.rank_type, job.job_series, job.sysnam_grp,
+            job.rank_type, job.rank_type_codes,
+            job.rank_grade_min, job.rank_grade_max,
+            job.job_series, job.sysnam_grp,
             job.regular_slots, job.alternate_slots,
-            job.qualifications, job.work_items,
-            job.work_address, job.contact_method, job.apply_method,
-            job.publish_date, job.deadline, job.deadline_end_iso,
-            job.job_url, now,
+            job.qualifications, job.work_items, job.work_address,
+            job.publish_date, job.deadline_start, job.deadline_end,
+            job.job_url, job.search_text, now,
         ))
 
 
@@ -402,86 +458,145 @@ def upsert_jobs(jobs: list[Job]) -> None:
 
 
 def search_jobs(
-    work_place_code: str = "",
-    person_kind_code: str = "",
+    work_place_codes: str = "",
+    rank_types: str = "",
+    rank_grade_min: int = 0,
+    rank_grade_max: int = 0,
     sysnam_grp: str = "",
-    title_keyword: str = "",
-    org_keyword: str = "",
-    sysnam_names: list[str] | None = None,
+    sysnam_names: str = "",
+    keywords: str = "",
     limit: int = 20,
 ) -> list[Job]:
     """
-    依條件從 jobs 表搜尋有效職缺（deadline_end_iso >= 今日）。
+    依條件從 jobs 表搜尋有效職缺（deadline_end >= 今日）。
 
-    sysnam_grp：用 jobs.sysnam_grp 欄位比對。
-                選 'A' 時同時包含 sysnam_grp='' 的職缺（約僱/約聘等無正式職系），
-                選 'B' 時只抓技術類，不包含無職系。
+    work_place_codes: 逗號分隔代碼，如 "10,42"（空=不限）
+    rank_types: 逗號分隔代碼，如 "2,3"（空=不限）
+    rank_grade_min/max: 職等篩選（0=不限）
+    sysnam_grp: '' / 'A' / 'B'（'A' 同時包含 sysnam_grp=''）
+    sysnam_names: 逗號分隔職系名稱（空=不限）
+    keywords: 逗號/空格分隔，多關鍵字 OR 比對（空=不限）
+
+    PostgreSQL：用 pg_trgm similarity 排序；SQLite：用 ILIKE。
     """
     from datetime import date
     today = date.today().isoformat()
 
-    where = ["deadline_end_iso >= ?"]
+    where = ["deadline_end >= ?"]
     params: list = [today]
 
-    if work_place_code:
-        where.append("work_place_code = ?")
-        params.append(work_place_code)
+    # 多地點 IN 比對
+    if work_place_codes:
+        codes = [c.strip() for c in work_place_codes.split(",") if c.strip()]
+        if codes:
+            placeholders = ",".join(["?"] * len(codes))
+            where.append(f"work_place_code IN ({placeholders})")
+            params.extend(codes)
 
-    if person_kind_code:
-        where.append("person_kind_code = ?")
-        params.append(person_kind_code)
+    # 官等代碼 ILIKE（代碼為單數字 1-4，直接用 LIKE '%N%' 安全）
+    if rank_types:
+        type_codes = [c.strip() for c in rank_types.split(",") if c.strip()]
+        if type_codes:
+            type_clauses = [f"rank_type_codes LIKE ?" for _ in type_codes]
+            where.append(f"({' OR '.join(type_clauses)})")
+            params.extend([f"%{c}%" for c in type_codes])
 
+    # 職務列等範圍
+    if rank_grade_min > 0:
+        where.append("rank_grade_max >= ?")   # 職缺最高職等 >= 使用者最低要求
+        params.append(rank_grade_min)
+    if rank_grade_max > 0:
+        where.append("rank_grade_min <= ?")   # 職缺最低職等 <= 使用者最高要求
+        params.append(rank_grade_max)
+
+    # 職系大分類
     if sysnam_grp == "B":
         where.append("sysnam_grp = 'B'")
     elif sysnam_grp == "A":
-        # 行政類：包含明確標記為 A 的，以及無職系（約僱/約聘多屬行政性質）
         where.append("(sysnam_grp = 'A' OR sysnam_grp = '')")
 
-    if title_keyword:
-        where.append("title LIKE ?")
-        params.append(f"%{title_keyword}%")
+    # 職系細項
+    if sysnam_names:
+        names = [n.strip() for n in sysnam_names.split(",") if n.strip()]
+        if names:
+            placeholders = ",".join(["?"] * len(names))
+            where.append(f"job_series IN ({placeholders})")
+            params.extend(names)
 
-    if org_keyword:
-        where.append("org_name LIKE ?")
-        params.append(f"%{org_keyword}%")
+    # 多關鍵字 OR 比對
+    kw_list = _split_keywords(keywords)
+    if kw_list:
+        kw_clauses = [
+            "(search_text LIKE ? OR title LIKE ? OR org_name LIKE ?)"
+            for _ in kw_list
+        ]
+        where.append(f"({' OR '.join(kw_clauses)})")
+        for kw in kw_list:
+            params.extend([f"%{kw}%", f"%{kw}%", f"%{kw}%"])
 
-    sql = (
-        "SELECT * FROM jobs WHERE "
-        + " AND ".join(where)
-        + " ORDER BY deadline_end_iso ASC LIMIT ?"
-    )
-    params.append(limit)
+    base_where = " AND ".join(where)
+
+    # PostgreSQL：用 pg_trgm similarity 計分排序
+    if _IS_POSTGRES and kw_list:
+        score_parts = []
+        score_params: list = []
+        for kw in kw_list:
+            score_parts.append(
+                "(similarity(title,?) + similarity(org_name,?) "
+                "+ similarity(qualifications,?) + similarity(work_items,?))"
+            )
+            score_params.extend([kw, kw, kw, kw])
+        score_expr = " + ".join(score_parts)
+        sql = (
+            f"SELECT *, ({score_expr}) AS _score FROM jobs "
+            f"WHERE {base_where} "
+            f"ORDER BY _score DESC, deadline_end ASC LIMIT ?"
+        )
+        all_params = tuple(score_params + params + [limit])
+    else:
+        sql = (
+            f"SELECT * FROM jobs WHERE {base_where} "
+            f"ORDER BY deadline_end ASC LIMIT ?"
+        )
+        all_params = tuple(params + [limit])
 
     with get_conn() as conn:
-        rows = _run(conn, sql, tuple(params)).fetchall()
+        rows = _run(conn, sql, all_params).fetchall()
 
-    results = []
-    for row in rows:
-        d = dict(row)
-        results.append(Job(
-            job_id           = d["job_id"],
-            title            = d.get("title", ""),
-            org_name         = d.get("org_name", ""),
-            work_place       = d.get("work_place", ""),
-            work_place_code  = d.get("work_place_code", ""),
-            person_kind      = d.get("person_kind", ""),
-            person_kind_code = d.get("person_kind_code", ""),
-            rank_type        = d.get("rank_type", ""),
-            job_series       = d.get("job_series", ""),
-            sysnam_grp       = d.get("sysnam_grp", ""),
-            regular_slots    = d.get("regular_slots", 0) or 0,
-            alternate_slots  = d.get("alternate_slots", 0) or 0,
-            qualifications   = d.get("qualifications", ""),
-            work_items       = d.get("work_items", ""),
-            work_address     = d.get("work_address", ""),
-            contact_method   = d.get("contact_method", ""),
-            apply_method     = d.get("apply_method", ""),
-            publish_date     = d.get("publish_date", ""),
-            deadline         = d.get("deadline", ""),
-            deadline_end_iso = d.get("deadline_end_iso", ""),
-            job_url          = d.get("job_url", ""),
-        ))
-    return results
+    return [_row_to_job(dict(row)) for row in rows]
+
+
+def _split_keywords(raw: str) -> list[str]:
+    """將逗號/空格/頓號分隔的關鍵字字串拆成 list。"""
+    if not raw:
+        return []
+    return [k for k in re.split(r"[\s、，,]+", raw.strip()) if k]
+
+
+def _row_to_job(d: dict) -> Job:
+    return Job(
+        job_id          = d["job_id"],
+        title           = d.get("title", ""),
+        org_name        = d.get("org_name", ""),
+        work_place      = d.get("work_place", ""),
+        work_place_code = d.get("work_place_code", ""),
+        rank_type       = d.get("rank_type", ""),
+        rank_type_codes = d.get("rank_type_codes", "") or "",
+        rank_grade_min  = d.get("rank_grade_min", 0) or 0,
+        rank_grade_max  = d.get("rank_grade_max", 0) or 0,
+        job_series      = d.get("job_series", ""),
+        sysnam_grp      = d.get("sysnam_grp", ""),
+        regular_slots   = d.get("regular_slots", 0) or 0,
+        alternate_slots = d.get("alternate_slots", 0) or 0,
+        qualifications  = d.get("qualifications", ""),
+        work_items      = d.get("work_items", ""),
+        work_address    = d.get("work_address", ""),
+        publish_date    = d.get("publish_date", ""),
+        deadline_start  = d.get("deadline_start", "") or "",
+        deadline_end    = d.get("deadline_end", "") or "",
+        job_url         = d.get("job_url", ""),
+        search_text     = d.get("search_text", "") or "",
+    )
 
 
 def get_jobs_count() -> int:
@@ -493,16 +608,15 @@ def get_jobs_count() -> int:
 
 
 def delete_expired_jobs() -> int:
-    """刪除截止日已過的職缺。回傳刪除筆數。"""
+    """刪除截止日已過的職缺。整批 upsert 完成後呼叫一次。回傳刪除筆數。"""
     from datetime import date
     today = date.today().isoformat()
     with get_conn() as conn:
         cur = _run(
             conn,
-            "DELETE FROM jobs WHERE deadline_end_iso != '' AND deadline_end_iso < ?",
+            "DELETE FROM jobs WHERE deadline_end != '' AND deadline_end < ?",
             (today,),
         )
-        # rowcount 在 psycopg2 cursor 與 sqlite3 cursor 上均可用
         count = cur.rowcount if hasattr(cur, "rowcount") else 0
     logger.info(f"已清除 {count} 筆過期職缺")
     return count
