@@ -140,6 +140,20 @@ def _build_multiselect_kb(
 async def _ask_location(user_id: int, chat_id: int, bot) -> None:
     """步驟 1：多選工作地點。"""
     opts = _location_options()
+    if not opts:
+        # 選單無法從 DGPA 取得，提示使用者點「不限」繼續
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                "⚠️ 無法載入工作地點選項（DGPA 連線失敗）\n"
+                "請點「不限地區」繼續，稍後可重新 /subscribe 重試。"
+            ),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("不限地區（繼續）", callback_data="LC:ALL")
+            ]]),
+        )
+        _conv[user_id].update({"step": "setup_location", "page": 0, "loc_options": []})
+        return
     selected = set(_conv[user_id].get("pending", {}).get("work_place_codes", "").split(",")) - {""}
     _conv[user_id].update({"step": "setup_location", "page": 0, "loc_options": opts})
     kb = _build_multiselect_kb(opts, 0, "LC", "LP", selected, "LC:CONFIRM", "LC:ALL")
@@ -191,6 +205,21 @@ async def _ask_sysnam_names(user_id: int, chat_id: int, bot, sysnam_grp: str) ->
     """步驟 4：多選職系細項（依大分類動態載入）。"""
     opts_raw = get_sysnam_names_for_grp(sysnam_grp)  # list[str]
     opts = [{"value": n, "text": n} for n in opts_raw]
+    if not opts:
+        # 選單無法取得，直接跳過職系細項
+        _conv[user_id].update({"step": "setup_sysnam_names", "page": 0, "sysnam_options": []})
+        _conv[user_id].setdefault("pending", {})["sysnam_names"] = ""
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                "⚠️ 無法載入職系細項（DGPA 連線失敗）\n"
+                "點「不限細項」繼續，稍後可重新 /subscribe 重試。"
+            ),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("不限細項（繼續）", callback_data="NC:ALL")
+            ]]),
+        )
+        return
     selected = set(
         n for n in _conv[user_id].get("pending", {}).get("sysnam_names", "").split(",") if n
     )

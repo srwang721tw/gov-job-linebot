@@ -4,11 +4,34 @@
 
 快取：工作地點、人員區分、職系（sysnam）
 """
+import socket
+
 import requests
+import urllib3.util.connection as _urllib3_cn
 from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from app.utils.config import CRAWLER_BASE_URL, CRAWLER_LIST_PAGE
 from app.utils.logger import logger
+
+# ── 強制 IPv4（與 scraper.py 相同，確保 Render 環境也能連到 DGPA）──────────────
+# DGPA 只支援 IPv4；Render 等雲端環境預設嘗試 IPv6 → errno 101 Network unreachable
+_urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
+
+_RETRY = Retry(
+    total=3,
+    backoff_factor=2,
+    status_forcelist=[429, 500, 502, 503, 504],
+)
+
+
+def _new_session() -> requests.Session:
+    s = requests.Session()
+    adapter = HTTPAdapter(max_retries=_RETRY)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+    return s
 
 LIST_URL = CRAWLER_BASE_URL + CRAWLER_LIST_PAGE
 HEADERS = {
@@ -52,11 +75,11 @@ def get_form_options() -> dict:
         return _cached
 
     try:
-        r = requests.get(LIST_URL, headers=HEADERS, timeout=30)
+        r = _new_session().get(LIST_URL, headers=HEADERS, timeout=30)
         r.encoding = "utf-8"
         soup = BeautifulSoup(r.text, "lxml")
 
-        _cached = {
+        result = {
             "work_place": _extract_options(
                 soup, "ctl00_ContentPlaceHolder1_drpWORK_PLACE"
             ),
@@ -67,14 +90,21 @@ def get_form_options() -> dict:
                 soup, "ctl00_ContentPlaceHolder1_drpSYSNAM"
             ),
         }
-        logger.info(
-            f"選單選項已載入：{len(_cached['work_place'])} 個地點、"
-            f"{len(_cached['person_kind'])} 個人員類別、"
-            f"{len(_cached['sysnam'])} 個職系"
-        )
+        # 只有成功取得有效資料才快取（避免把空結果永久快取）
+        if result["work_place"] or result["sysnam"]:
+            _cached = result
+            logger.info(
+                f"選單選項已載入：{len(_cached['work_place'])} 個地點、"
+                f"{len(_cached['person_kind'])} 個人員類別、"
+                f"{len(_cached['sysnam'])} 個職系"
+            )
+        else:
+            logger.warning("選單選項回應為空，將在下次呼叫時重試")
+            return result
     except Exception as e:
-        logger.error(f"無法取得選單選項：{e}")
-        _cached = {"work_place": [], "person_kind": [], "sysnam": []}
+        logger.error(f"無法取得選單選項（將在下次呼叫時重試）：{e}")
+        # 失敗時不快取，確保下次呼叫會重試
+        return {"work_place": [], "person_kind": [], "sysnam": []}
 
     return _cached
 
