@@ -17,7 +17,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.crawler.scraper import crawl_jobs
 from app.db.database import delete_expired_jobs, upsert_jobs
-from app.utils.config import MAX_CRAWL_PAGES_SCHEDULED
+from app.utils.config import DISABLE_SCHEDULER, MAX_CRAWL_PAGES_SCHEDULED
 from app.utils.logger import logger
 
 _scheduler: AsyncIOScheduler | None = None
@@ -59,6 +59,9 @@ async def daily_crawl_task() -> int:
 def start_scheduler() -> None:
     """啟動 APScheduler（在 FastAPI lifespan 呼叫）。"""
     global _scheduler
+    if DISABLE_SCHEDULER:
+        logger.info("APScheduler 已停用（DISABLE_SCHEDULER=true），爬蟲由 GitHub Actions 負責")
+        return
     _scheduler = AsyncIOScheduler(timezone="Asia/Taipei")
     _scheduler.add_job(
         daily_crawl_task,

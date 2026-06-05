@@ -20,6 +20,15 @@ TELEGRAM_WEBHOOK_URL: str = os.getenv("TELEGRAM_WEBHOOK_URL", "")
 # 設定後須在請求 header 帶上 X-Crawl-Secret: <此值>，cron-job.org 每日觸發用
 CRAWL_SECRET: str = os.getenv("CRAWL_SECRET", "")
 
+# GitHub Actions 觸發爬蟲（Render 無法連到 DGPA，改由 GitHub Actions 執行）
+# GITHUB_TOKEN：Personal Access Token（需有 repo 或 actions:write 權限）
+# GITHUB_REPO：格式 "owner/repo"，例如 "srwang721tw/gov-job-linebot"
+GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "")
+GITHUB_REPO:  str = os.getenv("GITHUB_REPO", "")
+
+# 設為 true 可停用 APScheduler（Render 上不需要排程，由 GitHub Actions 負責）
+DISABLE_SCHEDULER: bool = os.getenv("DISABLE_SCHEDULER", "").lower() in ("1", "true", "yes")
+
 BASE_DIR = Path(__file__).parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 SQLITE_PATH = str(DATA_DIR / "sqlite" / "jobs.db")
