@@ -13,6 +13,7 @@ v3.1 改動：
 import re
 import socket
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from typing import List
 from urllib.parse import urljoin
@@ -30,11 +31,12 @@ from app.crawler.form_options import (
 )
 from app.models.job import Job
 from app.utils.config import (
-    CRAWL_DETAIL_DELAY,
     CRAWLER_BASE_URL,
     CRAWLER_LIST_PAGE,
     MAX_CRAWL_PAGES,
 )
+
+_DETAIL_WORKERS = 8   # 並行抓詳細頁的 thread 數
 from app.utils.logger import logger
 
 # ── 強制 IPv4（解決 Render 等主機 IPv6 路由不通的問題）────────────────────────
@@ -499,21 +501,34 @@ def crawl_jobs(
         page += 1
         time.sleep(0.5)
 
-    # 建立 Job 物件（選擇性抓詳細頁）
+    # 建立 Job 物件（選擇性並行抓詳細頁）
     jobs: List[Job] = []
-    for i, raw in enumerate(all_raw):
-        detail: dict = {}
-        if fetch_detail and raw.get("job_url"):
-            detail = fetch_job_detail(session, raw["job_url"])
-            if CRAWL_DETAIL_DELAY > 0:
-                time.sleep(CRAWL_DETAIL_DELAY)
-            if (i + 1) % 50 == 0:
-                logger.info(f"詳細頁進度：{i + 1}/{len(all_raw)}")
+    if fetch_detail and all_raw:
+        # 並行抓詳細頁：ThreadPoolExecutor，session 的 urllib3 pool 是 thread-safe
+        detail_map: dict[str, dict] = {}
+        urls = [(raw["job_id"], raw["job_url"]) for raw in all_raw if raw.get("job_url")]
+        done = 0
+        with ThreadPoolExecutor(max_workers=_DETAIL_WORKERS) as pool:
+            future_to_id = {pool.submit(fetch_job_detail, session, url): jid
+                            for jid, url in urls}
+            for future in as_completed(future_to_id):
+                detail_map[future_to_id[future]] = future.result() or {}
+                done += 1
+                if done % 100 == 0:
+                    logger.info(f"詳細頁進度：{done}/{len(urls)}")
+        logger.info(f"詳細頁抓取完成：{len(detail_map)} 筆")
 
-        try:
-            jobs.append(_build_job(raw, detail if fetch_detail else None))
-        except Exception as e:
-            logger.warning(f"Job 建立失敗（job_id={raw.get('job_id')}）：{e}")
+        for raw in all_raw:
+            try:
+                jobs.append(_build_job(raw, detail_map.get(raw["job_id"], {})))
+            except Exception as e:
+                logger.warning(f"Job 建立失敗（{raw.get('job_id')}）：{e}")
+    else:
+        for raw in all_raw:
+            try:
+                jobs.append(_build_job(raw, None))
+            except Exception as e:
+                logger.warning(f"Job 建立失敗（{raw.get('job_id')}）：{e}")
 
     logger.info(f"爬蟲完成：共 {len(jobs)} 筆（fetch_detail={fetch_detail}）")
     return jobs

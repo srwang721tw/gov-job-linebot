@@ -30,8 +30,5 @@ MAX_CRAWL_PAGES = int(os.getenv("MAX_CRAWL_PAGES", "3"))
 # 排程爬蟲每頁最多爬幾頁（0 = 不限，抓全部）
 MAX_CRAWL_PAGES_SCHEDULED = int(os.getenv("MAX_CRAWL_PAGES_SCHEDULED", "0"))
 
-# 詳細頁爬取間隔（秒），避免對 DGPA 造成過大負擔
-CRAWL_DETAIL_DELAY = float(os.getenv("CRAWL_DETAIL_DELAY", "0.3"))
-
 # 回傳給使用者的最大職缺數
 TOP_K_RESULTS = int(os.getenv("TOP_K_RESULTS", "5"))

@@ -227,16 +227,14 @@ ON CONFLICT(platform, platform_user_id) DO UPDATE SET
     updated_at       = EXCLUDED.updated_at
 """
 
-_UPSERT_JOB = """
-INSERT INTO jobs
-    (job_id, title, org_name, work_place, work_place_code,
+_UPSERT_COLS = """(job_id, title, org_name, work_place, work_place_code,
      rank_type, rank_type_codes, rank_grade_min, rank_grade_max,
-     job_series, sysnam_grp,
-     regular_slots, alternate_slots,
+     job_series, sysnam_grp, regular_slots, alternate_slots,
      qualifications, work_items, work_address,
      publish_date, deadline_start, deadline_end,
-     job_url, search_text, crawled_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     job_url, search_text, crawled_at)"""
+
+_UPSERT_CONFLICT = """
 ON CONFLICT(job_id) DO UPDATE SET
     title           = EXCLUDED.title,
     org_name        = EXCLUDED.org_name,
@@ -257,9 +255,14 @@ ON CONFLICT(job_id) DO UPDATE SET
     work_address    = CASE WHEN EXCLUDED.work_address   != '' THEN EXCLUDED.work_address   ELSE jobs.work_address   END,
     publish_date    = CASE WHEN EXCLUDED.publish_date   != '' THEN EXCLUDED.publish_date   ELSE jobs.publish_date   END,
     regular_slots   = CASE WHEN EXCLUDED.regular_slots  != 0  THEN EXCLUDED.regular_slots  ELSE jobs.regular_slots  END,
-    alternate_slots = CASE WHEN EXCLUDED.alternate_slots!= 0  THEN EXCLUDED.alternate_slots ELSE jobs.alternate_slots END,
+    alternate_slots = CASE WHEN EXCLUDED.alternate_slots != 0  THEN EXCLUDED.alternate_slots ELSE jobs.alternate_slots END,
     search_text     = CASE WHEN EXCLUDED.search_text    != '' THEN EXCLUDED.search_text    ELSE jobs.search_text    END
 """
+
+# PostgreSQL 批次寫入：VALUES %s 由 execute_values 展開為多列
+_BULK_UPSERT_PG  = f"INSERT INTO jobs {_UPSERT_COLS} VALUES %s {_UPSERT_CONFLICT}"
+# SQLite / 單筆 fallback
+_UPSERT_JOB      = f"INSERT INTO jobs {_UPSERT_COLS} VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) {_UPSERT_CONFLICT}"
 
 
 # ── 連線管理 ──────────────────────────────────────────────────────────────────
@@ -434,33 +437,38 @@ def get_subscription_count() -> int:
 
 # ── 職缺 CRUD ──────────────────────────────────────────────────────────────────
 
-def upsert_job(job: Job) -> None:
-    now = datetime.now(timezone.utc).isoformat()
-    with get_conn() as conn:
-        _run(conn, _UPSERT_JOB, (
-            job.job_id, job.title, job.org_name,
-            job.work_place, job.work_place_code,
-            job.rank_type, job.rank_type_codes,
-            job.rank_grade_min, job.rank_grade_max,
-            job.job_series, job.sysnam_grp,
-            job.regular_slots, job.alternate_slots,
-            job.qualifications, job.work_items, job.work_address,
-            job.publish_date, job.deadline_start, job.deadline_end,
-            job.job_url, job.search_text, now,
-        ))
+def _job_to_tuple(job: Job, now: str) -> tuple:
+    """Job 物件 → upsert 用的參數 tuple（DRY：PostgreSQL 和 SQLite 共用）。"""
+    return (
+        job.job_id, job.title, job.org_name, job.work_place, job.work_place_code,
+        job.rank_type, job.rank_type_codes, job.rank_grade_min, job.rank_grade_max,
+        job.job_series, job.sysnam_grp, job.regular_slots, job.alternate_slots,
+        job.qualifications, job.work_items, job.work_address,
+        job.publish_date, job.deadline_start, job.deadline_end,
+        job.job_url, job.search_text, now,
+    )
 
 
 def upsert_jobs(jobs: list[Job]) -> None:
-    """批次 UPSERT 職缺（每筆個別執行，避免單筆錯誤中斷整批）。"""
-    ok = err = 0
-    for job in jobs:
-        try:
-            upsert_job(job)
-            ok += 1
-        except Exception as e:
-            logger.warning(f"upsert_job 失敗 job_id={job.job_id}: {e}")
-            err += 1
-    logger.info(f"upsert_jobs 完成：成功 {ok} 筆，失敗 {err} 筆")
+    """批次 UPSERT 職缺。
+    PostgreSQL：execute_values 單次 SQL（最快）。
+    SQLite：executemany 單一 transaction。
+    """
+    if not jobs:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    params = [_job_to_tuple(j, now) for j in jobs]
+
+    if _IS_POSTGRES:
+        from psycopg2.extras import execute_values
+        with get_conn() as conn:
+            cur = conn.cursor()
+            execute_values(cur, _BULK_UPSERT_PG, params)
+    else:
+        with get_conn() as conn:
+            conn.executemany(_UPSERT_JOB, params)
+
+    logger.info(f"upsert_jobs 完成：{len(jobs)} 筆")
 
 
 def search_jobs(
