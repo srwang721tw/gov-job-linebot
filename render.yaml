@@ -15,22 +15,5 @@ services:
         sync: false          # Neon PostgreSQL 連線字串（postgresql://...?sslmode=require）
       - key: TELEGRAM_BOT_TOKEN
         sync: false          # Telegram @BotFather 取得的 token（不用 Telegram 可留空）
-      - key: CRAWL_SECRET
-        sync: false          # 保護 /admin/trigger-crawl 端點的隨機字串（建議設定）
-      - key: MAX_CRAWL_PAGES
-        value: "3"           # 即時查詢最多 3 頁（約 45 筆）
-      - key: MAX_CRAWL_PAGES_SCHEDULED
-        value: "0"           # 排程爬取不限頁數（抓全部）
-      - key: CRAWL_DETAIL_DELAY
-        value: "0.3"         # 詳細頁爬取間隔（秒）
       - key: TOP_K_RESULTS
         value: "5"           # 回傳給使用者最多 5 個結果
-
-    # ── 資料持久化（選用，需付費 $0.25/GB/月）──────────────────────────────
-    # 啟用後 SQLite 訂閱/職缺資料才會在 restart 後保留。
-    # 正式部署建議使用 Neon PostgreSQL（DATABASE_URL），不需要 Disk。
-    #
-    # disk:
-    #   name: data
-    #   mountPath: /opt/render/project/src/data
-    #   sizeGB: 1

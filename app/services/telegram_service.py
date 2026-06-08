@@ -1,5 +1,5 @@
 """
-Telegram Bot 服務（v3.1）。
+Telegram Bot 服務（v3.2）。
 與 LINE bot 共用 query_service、database、form_options 層。
 
 訂閱設定流程（7 步驟，InlineKeyboard）：
@@ -26,6 +26,7 @@ callback_data 前綴：
   NC:CONFIRM 職系細項確認
   SKIP      略過（職務列等/關鍵字）
 """
+import asyncio
 import re
 import urllib.parse
 from typing import Optional
@@ -283,7 +284,8 @@ async def _save_and_confirm(user_id: int, keywords: str, chat_id: int, bot) -> N
         sysnam_names      = pending.get("sysnam_names", ""),
         keywords          = keywords,
     )
-    save_subscription(sub)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, save_subscription, sub)
     _conv.pop(user_id, None)
 
     grade_min, grade_max = sub.rank_grade_min, sub.rank_grade_max
@@ -623,8 +625,11 @@ async def handle_message(update: Update, context) -> None:
         await _save_and_confirm(user_id, text, chat_id, context.bot)
         return
 
-    # 預設：以訂閱條件查詢（Telegram 使用 HTML parse_mode）
-    result, parse_mode = handle_user_query("telegram", str(user_id))
+    # 預設：以訂閱條件查詢（DB 操作在 executor 中執行，避免阻塞 event loop）
+    loop = asyncio.get_event_loop()
+    result, parse_mode = await loop.run_in_executor(
+        None, handle_user_query, "telegram", str(user_id)
+    )
     if parse_mode == "HTML":
         await update.message.reply_text(result, parse_mode="HTML")
     else:

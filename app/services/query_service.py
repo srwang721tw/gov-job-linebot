@@ -1,18 +1,16 @@
 """
-查詢服務（v3.1）：從 jobs 資料表搜尋符合訂閱條件的職缺。
+查詢服務（v3.2）：從 jobs 資料表搜尋符合訂閱條件的職缺。
 
 流程：
   1. 讀取訂閱條件
   2. 搜尋 jobs 表（有效職缺 + 結構化條件篩選 + 多關鍵字模糊比對）
-  3. 若 jobs 表為空（尚未排程爬取），fallback 至即時爬取（無詳細頁，速度快）
-  4. 格式化為行動版訊息回覆
+  3. 格式化為行動版訊息回覆
 
-回傳欄位（v3.1）：職稱、機關名稱、職系、職務列等、工作地點、有效期間、url
+回傳欄位：職稱、機關名稱、職系、職務列等、工作地點、有效期間、url
   - LINE：純文字 URL
   - Telegram：HTML 超連結（parse_mode='HTML'）
 """
-from app.crawler.scraper import crawl_jobs
-from app.db.database import get_jobs_count, get_subscription, search_jobs
+from app.db.database import get_subscription, search_jobs
 from app.models.job import Job
 from app.utils.config import TOP_K_RESULTS
 from app.utils.logger import logger
@@ -49,12 +47,12 @@ def _format_period(deadline_start: str, deadline_end: str) -> str:
 
 def _format_job_block(idx: int, job: Job, platform: str = "line") -> str:
     """
-    單筆職缺格式（v3.1）：
+    單筆職缺格式：
 
     【1】職稱
     🏛 機關名稱
-    🗂 職系 | 📋 職務列等（X-Y職等）
-    📍 工作地點 | 📅 有效期間
+    🗂 職系｜📋 職務列等（X-Y職等）
+    📍 工作地點｜📅 有效期間
     🔗 url（LINE 純文字 / Telegram HTML 超連結）
     """
     lines = [f"【{idx}】{job.title}"]
@@ -121,8 +119,6 @@ def handle_user_query(platform: str, platform_user_id: str) -> tuple[str, str]:
     )
 
     jobs: list[Job] = []
-
-    # 先嘗試從 DB 搜尋
     try:
         jobs = search_jobs(
             work_place_codes = sub.work_place_codes,
@@ -136,32 +132,14 @@ def handle_user_query(platform: str, platform_user_id: str) -> tuple[str, str]:
         )
     except Exception as e:
         logger.error(f"DB 搜尋錯誤：{e}")
-
-    # jobs 表為空 → fallback 到即時爬取（列表頁，速度快）
-    if not jobs:
-        total = 0
-        try:
-            total = get_jobs_count()
-        except Exception:
-            pass
-
-        if total == 0:
-            logger.info("jobs 表為空，改用即時爬取")
-            try:
-                raw_jobs = crawl_jobs(
-                    is_office    = True,
-                    fetch_detail = False,
-                )
-                jobs = raw_jobs
-            except Exception as e:
-                logger.error(f"即時爬取錯誤：{e}")
-                return "⚠️ 查詢時發生錯誤\n請稍後再試。", parse_mode
+        return "⚠️ 查詢時發生錯誤，請稍後再試。", parse_mode
 
     if not jobs:
         cond = _build_cond_summary(sub)
         return (
             "😔 沒有找到符合條件的職缺\n\n"
             f"目前條件：\n{cond}\n\n"
+            "職缺資料每日更新，請稍後再查。\n"
             "輸入「訂閱」可修改條件。",
             parse_mode,
         )

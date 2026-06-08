@@ -104,11 +104,10 @@ CREATE TABLE IF NOT EXISTS subscription (
 )
 """
 
-# v3.1 jobs：統一日期 YYYY-MM-DD，新增 rank 欄位與 search_text
+# v3.2 jobs：job_id 直接作為 PRIMARY KEY（移除無意義的 serial id）
 _CREATE_JOBS_PG = """
 CREATE TABLE IF NOT EXISTS jobs (
-    id               SERIAL PRIMARY KEY,
-    job_id           VARCHAR(100) UNIQUE NOT NULL,
+    job_id           VARCHAR(100) PRIMARY KEY,
     title            VARCHAR(200) DEFAULT '',
     org_name         VARCHAR(200) DEFAULT '',
     work_place       VARCHAR(100) DEFAULT '',
@@ -135,29 +134,28 @@ CREATE TABLE IF NOT EXISTS jobs (
 
 _CREATE_JOBS_SQLITE = """
 CREATE TABLE IF NOT EXISTS jobs (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id           TEXT UNIQUE NOT NULL,
-    title            TEXT DEFAULT '',
-    org_name         TEXT DEFAULT '',
-    work_place       TEXT DEFAULT '',
-    work_place_code  TEXT DEFAULT '',
-    rank_type        TEXT DEFAULT '',
-    rank_type_codes  TEXT DEFAULT '',
-    rank_grade_min   INTEGER DEFAULT 0,
-    rank_grade_max   INTEGER DEFAULT 0,
-    job_series       TEXT DEFAULT '',
-    sysnam_grp       TEXT DEFAULT '',
-    regular_slots    INTEGER DEFAULT 0,
-    alternate_slots  INTEGER DEFAULT 0,
-    qualifications   TEXT DEFAULT '',
-    work_items       TEXT DEFAULT '',
-    work_address     TEXT DEFAULT '',
-    publish_date     TEXT DEFAULT '',
-    deadline_start   TEXT DEFAULT '',
-    deadline_end     TEXT DEFAULT '',
-    job_url          TEXT DEFAULT '',
-    search_text      TEXT DEFAULT '',
-    crawled_at       TEXT DEFAULT (datetime('now'))
+    job_id          TEXT PRIMARY KEY,
+    title           TEXT DEFAULT '',
+    org_name        TEXT DEFAULT '',
+    work_place      TEXT DEFAULT '',
+    work_place_code TEXT DEFAULT '',
+    rank_type       TEXT DEFAULT '',
+    rank_type_codes TEXT DEFAULT '',
+    rank_grade_min  INTEGER DEFAULT 0,
+    rank_grade_max  INTEGER DEFAULT 0,
+    job_series      TEXT DEFAULT '',
+    sysnam_grp      TEXT DEFAULT '',
+    regular_slots   INTEGER DEFAULT 0,
+    alternate_slots INTEGER DEFAULT 0,
+    qualifications  TEXT DEFAULT '',
+    work_items      TEXT DEFAULT '',
+    work_address    TEXT DEFAULT '',
+    publish_date    TEXT DEFAULT '',
+    deadline_start  TEXT DEFAULT '',
+    deadline_end    TEXT DEFAULT '',
+    job_url         TEXT DEFAULT '',
+    search_text     TEXT DEFAULT '',
+    crawled_at      TEXT DEFAULT (datetime('now'))
 )
 """
 
@@ -332,25 +330,7 @@ def init_db() -> None:
             except Exception as e:
                 logger.debug(f"ALTER 略過（可能已存在）: {e}")
 
-    # Step 3：資料 Migration — 將舊欄位資料複製到新欄位（已是新值則 COALESCE 不覆蓋）
-    if _IS_POSTGRES:
-        _data_migrations = [
-            # deadline_end_iso → deadline_end（舊欄位存在時才執行）
-            """
-            UPDATE jobs
-               SET deadline_end = deadline_end_iso
-             WHERE deadline_end IS DISTINCT FROM deadline_end_iso
-               AND deadline_end = ''
-               AND deadline_end_iso IS NOT NULL
-               AND deadline_end_iso != ''
-            """,
-        ]
-        for sql in _data_migrations:
-            try:
-                with get_conn() as conn:
-                    _run(conn, sql)
-            except Exception as e:
-                logger.debug(f"資料 migration 略過: {e}")
+    # Step 3：資料 Migration（v3.2 起 jobs 表已重建，此步驟保留給 subscription 用）
 
     # Step 4：建立 GIN 索引（在 search_text 欄位確定存在後才執行）
     if _IS_POSTGRES:

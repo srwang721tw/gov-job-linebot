@@ -45,8 +45,6 @@ HEADERS = {
     "Accept-Language": "zh-TW,zh;q=0.9",
 }
 
-_cached: dict | None = None
-
 # 職系大分類（硬編碼，與 DGPA drpSYSNAM_grp 對應）
 SYSNAM_GRP_OPTIONS = [
     {"value": "",  "text": "不限"},
@@ -159,6 +157,10 @@ _STATIC_OPTIONS: dict = {
     "person_kind": [],   # 訂閱條件已移除人員類別，無需此欄位
     "sysnam":      _SYSNAM_STATIC,
 }
+
+# v3.2：以靜態資料初始化快取，完全跳過 DGPA HTTP 請求（Render 無法連到 DGPA）
+# 若需要強制從 DGPA 重新抓取（本機開發用），呼叫 clear_cache() 後再 get_form_options()
+_cached = _STATIC_OPTIONS
 
 
 # ── 選單選項取得 ──────────────────────────────────────────────────────────────
