@@ -31,4 +31,8 @@ MAX_CRAWL_PAGES = int(os.getenv("MAX_CRAWL_PAGES", "3"))
 MAX_CRAWL_PAGES_SCHEDULED = int(os.getenv("MAX_CRAWL_PAGES_SCHEDULED", "0"))
 
 # 回傳給使用者的最大職缺數
-TOP_K_RESULTS = int(os.getenv("TOP_K_RESULTS", "5"))
+TOP_K_RESULTS = int(os.getenv("TOP_K_RESULTS", "10"))
+
+# 職缺詳細頁 URL（Render 自動提供 RENDER_EXTERNAL_URL）
+_render_url = os.getenv("RENDER_EXTERNAL_URL", "https://gov-job-linebot.onrender.com").rstrip("/")
+DETAIL_PAGE_URL = f"{_render_url}/detail"

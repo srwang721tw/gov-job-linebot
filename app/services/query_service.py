@@ -12,7 +12,7 @@
 """
 from app.db.database import get_subscription, search_jobs
 from app.models.job import Job
-from app.utils.config import TOP_K_RESULTS
+from app.utils.config import DETAIL_PAGE_URL, TOP_K_RESULTS
 from app.utils.logger import logger
 
 
@@ -89,11 +89,18 @@ def _format_job_block(idx: int, job: Job, platform: str = "line") -> str:
 
 # ── 主要查詢函式 ──────────────────────────────────────────────────────────────
 
-def handle_user_query(platform: str, platform_user_id: str) -> tuple[str, str]:
+def handle_user_query(
+    platform: str,
+    platform_user_id: str,
+    keyword: str = "",
+) -> tuple[str, str]:
     """
     回傳 (message_text, parse_mode)。
     LINE：parse_mode=''（純文字）
     Telegram：parse_mode='HTML'
+
+    keyword：用戶即時輸入的關鍵字（非空時取代訂閱的 keywords 欄位）。
+    空字串（/results 指令）→ 使用訂閱中儲存的 keywords。
     """
     sub = get_subscription(platform, platform_user_id)
     parse_mode = "HTML" if platform == "telegram" else ""
@@ -112,10 +119,13 @@ def handle_user_query(platform: str, platform_user_id: str) -> tuple[str, str]:
             parse_mode,
         )
 
+    # keyword 非空 → 以用戶輸入取代訂閱關鍵字；空 → 沿用訂閱關鍵字
+    effective_kw = keyword if keyword else sub.keywords
+
     logger.info(
         f"查詢中 {platform}:{platform_user_id[:8]}... | "
         f"地點={sub.work_place_names!r} 職系={sub.sysnam_grp!r} "
-        f"關鍵字={sub.keywords!r}"
+        f"關鍵字={effective_kw!r}"
     )
 
     jobs: list[Job] = []
@@ -127,7 +137,7 @@ def handle_user_query(platform: str, platform_user_id: str) -> tuple[str, str]:
             rank_grade_max   = sub.rank_grade_max,
             sysnam_grp       = sub.sysnam_grp,
             sysnam_names     = sub.sysnam_names,
-            keywords         = sub.keywords,
+            keywords         = effective_kw,
             limit            = TOP_K_RESULTS * 3,
         )
     except Exception as e:
@@ -149,7 +159,8 @@ def handle_user_query(platform: str, platform_user_id: str) -> tuple[str, str]:
     header = f"🔍 {loc_label}｜找到 {len(jobs)} 個職缺\n（顯示前 {len(top)} 筆）"
     blocks = [_format_job_block(i + 1, job, platform) for i, job in enumerate(top)]
 
-    return header + "\n\n" + "\n\n".join(blocks), parse_mode
+    footer = f"\n\n💻 查看全部職缺（可篩選/排序）：\n{DETAIL_PAGE_URL}"
+    return header + "\n\n" + "\n\n".join(blocks) + footer, parse_mode
 
 
 def _build_cond_summary(sub) -> str:

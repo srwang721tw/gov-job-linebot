@@ -58,8 +58,11 @@ _conv: dict[str, dict] = {}
 _HELP_TEXT = "\n".join([
     "📋 使用說明",
     "",
-    "傳任何訊息",
-    "  → 查詢最新職缺",
+    "「/results」或「最新職缺」",
+    "  → 依訂閱條件查詢職缺",
+    "",
+    "傳任何文字（如「行政」「台北」）",
+    "  → 以輸入文字為關鍵字查詢",
     "",
     "「訂閱」",
     "  → 設定地點／官等／職系／職等／關鍵字",
@@ -75,6 +78,7 @@ _TRIGGERS_SUBSCRIBE  = {"訂閱", "設定條件", "設定訂閱", "訂閱設定"
 _TRIGGERS_MY_SUB     = {"我的訂閱", "查看訂閱", "訂閱資訊", "目前條件"}
 _TRIGGERS_DEL_SUB    = {"刪除訂閱", "取消訂閱", "清除訂閱"}
 _TRIGGERS_HELP       = {"說明", "help", "Help", "?", "？"}
+_TRIGGERS_RESULTS    = {"/results", "results", "查看職缺", "最新職缺"}
 
 
 # ── 回覆工具 ─────────────────────────────────────────────────────────────────
@@ -474,6 +478,11 @@ def handle_message(event: MessageEvent) -> None:
         _reply(reply_token, TextMessage(text=_HELP_TEXT))
         return
 
+    if text in _TRIGGERS_RESULTS:
+        result, _ = handle_user_query("line", user_id)   # 不帶 keyword → 使用訂閱關鍵字
+        _reply(reply_token, TextMessage(text=result))
+        return
+
     # ── 對話狀態機 ────────────────────────────────────────────────────────────
     if step == "setup_location":
         _handle_location_step(user_id, text, reply_token)
@@ -499,6 +508,6 @@ def handle_message(event: MessageEvent) -> None:
         _handle_keywords_step(user_id, text, reply_token)
         return
 
-    # ── 預設：以訂閱條件查詢（LINE 不使用 parse_mode，純文字）────────────────
-    result, _ = handle_user_query("line", user_id)
+    # ── 預設：以輸入文字為關鍵字，合併訂閱其他條件查詢 ────────────────────────
+    result, _ = handle_user_query("line", user_id, keyword=text)
     _reply(reply_token, TextMessage(text=result))

@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>政府職缺查詢</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f7fa; color: #333; font-size: 14px; }
+  header { background: #1a56db; color: #fff; padding: 16px 24px; }
+  header h1 { font-size: 20px; font-weight: 700; }
+  header p { font-size: 12px; opacity: 0.8; margin-top: 4px; }
+
+  .filters { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 12px 24px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+  .filter-group { display: flex; flex-direction: column; gap: 4px; }
+  .filter-group label { font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
+  .filter-group input, .filter-group select { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; min-width: 160px; }
+  .filter-group input:focus, .filter-group select:focus { outline: none; border-color: #1a56db; box-shadow: 0 0 0 2px rgba(26,86,219,0.2); }
+
+  .rank-checks { display: flex; gap: 8px; flex-wrap: wrap; padding: 4px 0; }
+  .rank-checks label { display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 13px; }
+  .rank-checks input[type=checkbox] { cursor: pointer; }
+
+  .btn-clear { padding: 6px 14px; background: #6b7280; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; align-self: flex-end; }
+  .btn-clear:hover { background: #4b5563; }
+
+  .stats { padding: 10px 24px; font-size: 13px; color: #6b7280; background: #fff; border-bottom: 1px solid #e2e8f0; }
+  .stats strong { color: #111; }
+
+  .table-wrap { overflow-x: auto; padding: 0 24px 24px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-top: 16px; }
+  th { background: #f9fafb; font-weight: 600; text-align: left; padding: 10px 14px; border-bottom: 2px solid #e5e7eb; white-space: nowrap; cursor: pointer; user-select: none; color: #374151; }
+  th:hover { background: #f3f4f6; }
+  th .sort-icon { margin-left: 4px; opacity: 0.4; }
+  th.sorted .sort-icon { opacity: 1; }
+  td { padding: 9px 14px; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #f9fafb; }
+
+  td.title a { color: #1a56db; text-decoration: none; font-weight: 500; }
+  td.title a:hover { text-decoration: underline; }
+  td.deadline { white-space: nowrap; }
+  td.deadline.soon { color: #dc2626; font-weight: 600; }
+  td.rank { max-width: 160px; }
+
+  .badge { display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge-A { background: #dbeafe; color: #1e40af; }
+  .badge-B { background: #dcfce7; color: #166534; }
+  .badge-other { background: #f3f4f6; color: #374151; }
+
+  .pagination { display: flex; justify-content: center; align-items: center; gap: 8px; padding: 16px 24px; }
+  .page-btn { padding: 6px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; }
+  .page-btn:hover:not(:disabled) { background: #f9fafb; border-color: #1a56db; color: #1a56db; }
+  .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .page-btn.active { background: #1a56db; color: #fff; border-color: #1a56db; }
+  .page-info { font-size: 13px; color: #6b7280; }
+
+  .loading { text-align: center; padding: 60px; color: #9ca3af; font-size: 16px; }
+  .empty { text-align: center; padding: 40px; color: #9ca3af; }
+
+  @media (max-width: 640px) {
+    .filters { padding: 12px; }
+    .table-wrap { padding: 0 12px 16px; }
+    .stats { padding: 8px 12px; }
+    td, th { padding: 8px 10px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🏛 政府職缺查詢</h1>
+  <p>資料來源：行政院人事行政總處事求人系統，每日更新</p>
+</header>
+
+<div class="filters">
+  <div class="filter-group">
+    <label>關鍵字</label>
+    <input type="text" id="kw" placeholder="職稱、機關、職系..." oninput="filterAndRender()">
+  </div>
+  <div class="filter-group">
+    <label>工作地點</label>
+    <select id="location" onchange="filterAndRender()">
+      <option value="">全部地點</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>職系大分類</label>
+    <select id="sysnam" onchange="filterAndRender()">
+      <option value="">全部</option>
+      <option value="A">行政類</option>
+      <option value="B">技術類</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>官等（可複選）</label>
+    <div class="rank-checks">
+      <label><input type="checkbox" value="1" onchange="filterAndRender()"> 簡任</label>
+      <label><input type="checkbox" value="2" onchange="filterAndRender()"> 薦任</label>
+      <label><input type="checkbox" value="3" onchange="filterAndRender()"> 委任</label>
+      <label><input type="checkbox" value="4" onchange="filterAndRender()"> 其他</label>
+    </div>
+  </div>
+  <button class="btn-clear" onclick="clearFilters()">清除篩選</button>
+</div>
+
+<div class="stats" id="stats">載入中...</div>
+
+<div class="table-wrap">
+  <div id="loading" class="loading">⏳ 載入職缺資料中...</div>
+  <table id="table" style="display:none">
+    <thead>
+      <tr>
+        <th onclick="sortBy('title')">職稱 <span class="sort-icon" id="icon-title">↕</span></th>
+        <th onclick="sortBy('org_name')">機關 <span class="sort-icon" id="icon-org_name">↕</span></th>
+        <th onclick="sortBy('work_place')">工作地點 <span class="sort-icon" id="icon-work_place">↕</span></th>
+        <th>官等</th>
+        <th onclick="sortBy('job_series')">職系 <span class="sort-icon" id="icon-job_series">↕</span></th>
+        <th onclick="sortBy('deadline_end')">截止日 <span class="sort-icon" id="icon-deadline_end" class="sorted">↑</span></th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<div class="pagination" id="pagination"></div>
+
+<script>
+const PAGE_SIZE = 50;
+let allJobs = [];
+let filtered = [];
+let sortField = 'deadline_end';
+let sortAsc = true;
+let currentPage = 1;
+
+// 載入資料
+fetch('/api/jobs')
+  .then(r => r.json())
+  .then(data => {
+    allJobs = data;
+    buildLocationOptions();
+    filterAndRender();
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('table').style.display = 'table';
+  })
+  .catch(e => {
+    document.getElementById('loading').textContent = '❌ 載入失敗，請重新整理';
+  });
+
+function buildLocationOptions() {
+  const sel = document.getElementById('location');
+  const places = [...new Set(allJobs.map(j => j.work_place).filter(Boolean))].sort();
+  places.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p;
+    opt.textContent = p;
+    sel.appendChild(opt);
+  });
+}
+
+function getCheckedRanks() {
+  return [...document.querySelectorAll('.rank-checks input:checked')].map(c => c.value);
+}
+
+function filterAndRender() {
+  const kw = document.getElementById('kw').value.trim().toLowerCase();
+  const loc = document.getElementById('location').value;
+  const sys = document.getElementById('sysnam').value;
+  const ranks = getCheckedRanks();
+
+  filtered = allJobs.filter(j => {
+    if (kw && !(`${j.title} ${j.org_name} ${j.job_series}`).toLowerCase().includes(kw)) return false;
+    if (loc && j.work_place !== loc) return false;
+    if (sys) {
+      if (sys === 'A' && j.sysnam_grp !== 'A' && j.sysnam_grp !== '') return false;
+      if (sys === 'B' && j.sysnam_grp !== 'B') return false;
+    }
+    if (ranks.length > 0) {
+      const codes = (j.rank_type_codes || '').split(',').map(c => c.trim());
+      if (!ranks.some(r => codes.includes(r))) return false;
+    }
+    return true;
+  });
+
+  // 排序
+  filtered.sort((a, b) => {
+    let va = a[sortField] || '', vb = b[sortField] || '';
+    if (sortField === 'deadline_end') {
+      va = va || '9999-12-31'; vb = vb || '9999-12-31';
+    }
+    if (va < vb) return sortAsc ? -1 : 1;
+    if (va > vb) return sortAsc ? 1 : -1;
+    return 0;
+  });
+
+  currentPage = 1;
+  renderPage();
+}
+
+function renderPage() {
+  const total = filtered.length;
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const end = Math.min(start + PAGE_SIZE, total);
+  const page = filtered.slice(start, end);
+
+  // stats
+  const statsEl = document.getElementById('stats');
+  statsEl.innerHTML = `共 <strong>${allJobs.length}</strong> 筆職缺，篩選後 <strong>${total}</strong> 筆，顯示第 <strong>${start + 1}–${end}</strong> 筆`;
+
+  // tbody
+  const tbody = document.getElementById('tbody');
+  if (page.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">沒有符合條件的職缺</td></tr>';
+  } else {
+    tbody.innerHTML = page.map(j => {
+      const badge = j.sysnam_grp === 'A' ? 'badge-A'
+                  : j.sysnam_grp === 'B' ? 'badge-B' : 'badge-other';
+      const seriesLabel = j.job_series
+        ? `<span class="badge ${badge}">${esc(j.job_series)}</span>`
+        : '';
+      const deadlineSoon = j.deadline_end && j.deadline_end <= daysFromNow(7);
+      const titleCell = j.job_url
+        ? `<a href="${esc(j.job_url)}" target="_blank" rel="noopener">${esc(j.title)}</a>`
+        : esc(j.title);
+      return `<tr>
+        <td class="title">${titleCell}</td>
+        <td>${esc(j.org_name)}</td>
+        <td>${esc(j.work_place)}</td>
+        <td class="rank">${esc(j.rank_type)}</td>
+        <td>${seriesLabel}</td>
+        <td class="deadline${deadlineSoon ? ' soon' : ''}">${esc(j.deadline_end)}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  renderPagination(total);
+}
+
+function renderPagination(total) {
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  const pag = document.getElementById('pagination');
+  if (totalPages <= 1) { pag.innerHTML = ''; return; }
+
+  let html = `<button class="page-btn" onclick="goPage(${currentPage-1})" ${currentPage===1?'disabled':''}>‹ 上一頁</button>`;
+  // 顯示最多 7 個頁碼
+  const range = pageRange(currentPage, totalPages);
+  range.forEach(p => {
+    if (p === '...') {
+      html += `<span class="page-info">…</span>`;
+    } else {
+      html += `<button class="page-btn${p===currentPage?' active':''}" onclick="goPage(${p})">${p}</button>`;
+    }
+  });
+  html += `<button class="page-btn" onclick="goPage(${currentPage+1})" ${currentPage===totalPages?'disabled':''}>下一頁 ›</button>`;
+  html += `<span class="page-info">第 ${currentPage} / ${totalPages} 頁</span>`;
+  pag.innerHTML = html;
+}
+
+function pageRange(cur, total) {
+  if (total <= 7) return Array.from({length: total}, (_, i) => i + 1);
+  const r = [];
+  if (cur > 3) { r.push(1); if (cur > 4) r.push('...'); }
+  for (let i = Math.max(1, cur-2); i <= Math.min(total, cur+2); i++) r.push(i);
+  if (cur < total - 2) { if (cur < total - 3) r.push('...'); r.push(total); }
+  return r;
+}
+
+function goPage(n) {
+  if (n < 1 || n > Math.ceil(filtered.length / PAGE_SIZE)) return;
+  currentPage = n;
+  renderPage();
+  window.scrollTo(0, 0);
+}
+
+function sortBy(field) {
+  if (sortField === field) {
+    sortAsc = !sortAsc;
+  } else {
+    sortField = field;
+    sortAsc = (field === 'deadline_end');
+  }
+  // 更新 icon
+  document.querySelectorAll('th').forEach(th => th.classList.remove('sorted'));
+  const icon = document.getElementById(`icon-${field}`);
+  if (icon) {
+    icon.textContent = sortAsc ? '↑' : '↓';
+    icon.closest('th').classList.add('sorted');
+  }
+  // reset other icons
+  ['title','org_name','work_place','job_series','deadline_end'].forEach(f => {
+    if (f !== field) {
+      const el = document.getElementById(`icon-${f}`);
+      if (el) el.textContent = '↕';
+    }
+  });
+  currentPage = 1;
+  renderPage();
+}
+
+function clearFilters() {
+  document.getElementById('kw').value = '';
+  document.getElementById('location').value = '';
+  document.getElementById('sysnam').value = '';
+  document.querySelectorAll('.rank-checks input').forEach(c => c.checked = false);
+  filterAndRender();
+}
+
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function daysFromNow(n) {
+  const d = new Date(); d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+</script>
+</body>
+</html>

@@ -1,5 +1,7 @@
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from linebot.v3.exceptions import InvalidSignatureError
 
 from app.db.database import get_jobs_count, get_subscription_count
@@ -7,6 +9,8 @@ from app.services.line_service import handler
 from app.utils.logger import logger
 
 router = APIRouter()
+
+_STATIC_DIR = Path(__file__).parent.parent / "static"
 
 
 @router.get("/health")
@@ -16,6 +20,35 @@ async def health_check():
         "subscription_count": get_subscription_count(),
         "jobs_count": get_jobs_count(),
     }
+
+
+# ── 職缺詳細頁（一頁式查詢網頁）─────────────────────────────────────────────
+
+@router.get("/detail", response_class=HTMLResponse)
+def detail_page():
+    return (_STATIC_DIR / "detail.html").read_text(encoding="utf-8")
+
+
+@router.get("/api/jobs")
+def api_jobs():
+    """回傳所有有效職缺的 JSON 陣列（供 /detail 頁面載入）。"""
+    from app.db.database import search_jobs
+    jobs = search_jobs(limit=5000)
+    return [
+        {
+            "title":           j.title,
+            "org_name":        j.org_name,
+            "work_place":      j.work_place,
+            "rank_type":       j.rank_type,
+            "rank_type_codes": j.rank_type_codes,
+            "job_series":      j.job_series,
+            "sysnam_grp":      j.sysnam_grp,
+            "deadline_start":  j.deadline_start,
+            "deadline_end":    j.deadline_end,
+            "job_url":         j.job_url,
+        }
+        for j in jobs
+    ]
 
 
 # ── LINE webhook ──────────────────────────────────────────────────────────────

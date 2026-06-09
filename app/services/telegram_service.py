@@ -388,11 +388,26 @@ async def cmd_help(update: Update, context) -> None:
         "📋 使用說明",
         "",
         "/subscribe          設定訂閱條件",
+        "/results            依訂閱條件查詢職缺",
         "/mysubscription     查看目前設定",
         "/deletesubscription 刪除訂閱",
         "",
-        "傳任何訊息即可查詢最新職缺。",
+        "傳任何文字（如「行政」「台北」）",
+        "  → 以輸入文字為關鍵字查詢",
     ]))
+
+
+async def cmd_results(update: Update, context) -> None:
+    """依完整訂閱條件（含儲存的關鍵字）查詢職缺。"""
+    user_id = update.effective_user.id
+    loop = asyncio.get_event_loop()
+    result, parse_mode = await loop.run_in_executor(
+        None, handle_user_query, "telegram", str(user_id)
+    )
+    if parse_mode == "HTML":
+        await update.message.reply_text(result, parse_mode="HTML")
+    else:
+        await update.message.reply_text(result)
 
 
 # ── Callback query handler ────────────────────────────────────────────────────
@@ -625,10 +640,10 @@ async def handle_message(update: Update, context) -> None:
         await _save_and_confirm(user_id, text, chat_id, context.bot)
         return
 
-    # 預設：以訂閱條件查詢（DB 操作在 executor 中執行，避免阻塞 event loop）
+    # 預設：以輸入文字為關鍵字，合併訂閱其他條件查詢
     loop = asyncio.get_event_loop()
     result, parse_mode = await loop.run_in_executor(
-        None, handle_user_query, "telegram", str(user_id)
+        None, handle_user_query, "telegram", str(user_id), text
     )
     if parse_mode == "HTML":
         await update.message.reply_text(result, parse_mode="HTML")
@@ -644,6 +659,7 @@ def build_telegram_app() -> Application:
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start",              cmd_start))
     app.add_handler(CommandHandler("subscribe",          cmd_subscribe))
+    app.add_handler(CommandHandler("results",            cmd_results))
     app.add_handler(CommandHandler("mysubscription",     cmd_mysubscription))
     app.add_handler(CommandHandler("deletesubscription", cmd_deletesubscription))
     app.add_handler(CommandHandler("help",               cmd_help))

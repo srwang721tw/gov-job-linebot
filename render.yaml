@@ -16,4 +16,4 @@ services:
       - key: TELEGRAM_BOT_TOKEN
         sync: false          # Telegram @BotFather 取得的 token（不用 Telegram 可留空）
       - key: TOP_K_RESULTS
-        value: "5"           # 回傳給使用者最多 5 個結果
+        value: "10"          # 回傳給使用者最多 10 個結果

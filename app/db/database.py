@@ -110,13 +110,13 @@ CREATE TABLE IF NOT EXISTS jobs (
     job_id           VARCHAR(100) PRIMARY KEY,
     title            VARCHAR(200) DEFAULT '',
     org_name         VARCHAR(200) DEFAULT '',
-    work_place       VARCHAR(100) DEFAULT '',
+    work_place       TEXT         DEFAULT '',
     work_place_code  VARCHAR(10)  DEFAULT '',
     rank_type        TEXT         DEFAULT '',
     rank_type_codes  TEXT         DEFAULT '',
     rank_grade_min   INTEGER      DEFAULT 0,
     rank_grade_max   INTEGER      DEFAULT 0,
-    job_series       VARCHAR(100) DEFAULT '',
+    job_series       TEXT         DEFAULT '',
     sysnam_grp       VARCHAR(5)   DEFAULT '',
     regular_slots    INTEGER      DEFAULT 0,
     alternate_slots  INTEGER      DEFAULT 0,
@@ -185,6 +185,9 @@ _ALTER_JOBS = [
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS deadline_start  VARCHAR(10) DEFAULT ''",
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS deadline_end    VARCHAR(10) DEFAULT ''",
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS search_text     TEXT DEFAULT ''",
+    # Bug fix v3.2.1：DGPA 詳細頁文字可能超過 100 字元
+    "ALTER TABLE jobs ALTER COLUMN work_place TYPE TEXT",
+    "ALTER TABLE jobs ALTER COLUMN job_series TYPE TEXT",
 ]
 
 # ── UPSERT SQL ────────────────────────────────────────────────────────────────
