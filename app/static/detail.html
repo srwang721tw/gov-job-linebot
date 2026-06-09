@@ -142,12 +142,13 @@ header p  { font-size: 11px; opacity: .7; margin-top: 1px; }
   display: inline-flex; align-items: center; gap: 5px;
   padding: 6px 13px;
   border: 1.5px solid var(--border); border-radius: 20px;
-  font-size: 13px; cursor: pointer; user-select: none; white-space: nowrap;
+  background: #fff; color: var(--text);   /* reset <button> defaults */
+  font-size: 13px; font-family: inherit;
+  cursor: pointer; user-select: none; white-space: nowrap;
   transition: all .15s;
 }
 .rank-pill:hover { border-color: var(--primary); background: var(--primary-bg); }
 .rank-pill.on { border-color: var(--primary); background: var(--primary-bg); color: var(--primary-text); font-weight: 600; }
-.rank-pill input { display: none; }
 
 /* Grade range */
 .grade-row { display: flex; align-items: center; gap: 6px; }
@@ -425,10 +426,10 @@ tbody tr:hover td { background: #fafbff; }
         <div class="filter-group fg-rank">
           <label class="filter-label">🎖 官等（可複選）</label>
           <div class="rank-pills">
-            <label class="rank-pill" onclick="toggleRank('1',this)"><input type="checkbox"> 簡任</label>
-            <label class="rank-pill" onclick="toggleRank('2',this)"><input type="checkbox"> 薦任</label>
-            <label class="rank-pill" onclick="toggleRank('3',this)"><input type="checkbox"> 委任</label>
-            <label class="rank-pill" onclick="toggleRank('4',this)"><input type="checkbox"> 其他</label>
+            <button type="button" class="rank-pill" onclick="toggleRank('1',this)">簡任</button>
+            <button type="button" class="rank-pill" onclick="toggleRank('2',this)">薦任</button>
+            <button type="button" class="rank-pill" onclick="toggleRank('3',this)">委任</button>
+            <button type="button" class="rank-pill" onclick="toggleRank('4',this)">其他</button>
           </div>
         </div>
 
@@ -677,8 +678,11 @@ fetch('/api/jobs')
    Build dropdown / multi-select options from data
 ───────────────────────────────────────────────────── */
 function buildDropdowns() {
-  /* Locations – unique sorted */
-  const locs = [...new Set(allJobs.map(j => j.work_place).filter(Boolean))].sort();
+  /* Locations – parse + clean each work_place value
+     work_place may be comma-separated and/or have numeric code prefix (e.g. "61-嘉義縣") */
+  const locSet = new Set();
+  allJobs.forEach(j => parseLocations(j.work_place).forEach(l => locSet.add(l)));
+  const locs = [...locSet].sort();
   locMS.setItems(locs.map(v => ({ value: v, label: v })));
 
   /* sysnam map: grp → sorted unique job_series */
@@ -730,7 +734,7 @@ function applyFilters() {
 
   filtered = allJobs.filter(j => {
     if (kw && !`${j.title} ${j.org_name} ${j.job_series} ${j.rank_type}`.toLowerCase().includes(kw)) return false;
-    if (selLoc.size   > 0 && !selLoc.has(j.work_place))  return false;
+    if (selLoc.size > 0 && !parseLocations(j.work_place).some(l => selLoc.has(l))) return false;
     if (grp           && j.sysnam_grp !== grp)           return false;
     if (selSname.size > 0 && !selSname.has(j.job_series)) return false;
     if (activeRanks.size > 0) {
@@ -941,6 +945,15 @@ function toggleFilterBody() {
 /* ─────────────────────────────────────────────────────
    Helpers
 ───────────────────────────────────────────────────── */
+/* Parse raw work_place string into array of clean location names
+   Handles: "南投縣,61-嘉義縣,82-高雄市,97-花蓮縣" → ["南投縣","嘉義縣","高雄市","花蓮縣"] */
+function parseLocations(raw) {
+  if (!raw) return [];
+  return raw.split(/[,，]/)
+    .map(s => s.trim().replace(/^\d{2,3}-/, ''))   // strip leading code prefix like "61-"
+    .filter(Boolean);
+}
+
 function fmtGrade(mn, mx) {
   if (!mn && !mx) return '不限';
   if (mn && mx && mn === mx) return `第${mn}職等`;
