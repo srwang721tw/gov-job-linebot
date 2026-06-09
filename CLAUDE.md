@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚡ 強制規則（每次都必須遵守）
+
+**完成任何程式碼修改後，必須自動執行 git commit + git push 到 GitHub。**
+- 不需要使用者提醒，修改完就 commit + push
+- commit message 用繁體中文或英文描述本次修改內容
+- 格式：`git commit -m "類型(範圍): 說明"`
+- push 指令：`git push origin main`
+
 ## 專案說明（v3.1）
 
 LINE + Telegram 聊天機器人，讓使用者設定工作地點（多選）、官等類別（多選）、職系、職務列等區間、關鍵字等訂閱條件。
