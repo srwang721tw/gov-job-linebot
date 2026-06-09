@@ -2,317 +2,963 @@
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>政府職缺查詢</title>
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f7fa; color: #333; font-size: 14px; }
-  header { background: #1a56db; color: #fff; padding: 16px 24px; }
-  header h1 { font-size: 20px; font-weight: 700; }
-  header p { font-size: 12px; opacity: 0.8; margin-top: 4px; }
+/* ── Reset ──────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+button, input, select { font-family: inherit; }
 
-  .filters { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 12px 24px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
-  .filter-group { display: flex; flex-direction: column; gap: 4px; }
-  .filter-group label { font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
-  .filter-group input, .filter-group select { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; min-width: 160px; }
-  .filter-group input:focus, .filter-group select:focus { outline: none; border-color: #1a56db; box-shadow: 0 0 0 2px rgba(26,86,219,0.2); }
+/* ── Variables ──────────────────────────────────────────── */
+:root {
+  --primary:       #1e40af;
+  --primary-dark:  #1e3a8a;
+  --primary-bg:    #dbeafe;
+  --primary-text:  #1e40af;
+  --success-bg:    #dcfce7;
+  --success-text:  #166534;
+  --danger:        #dc2626;
+  --danger-bg:     #fee2e2;
+  --warn-bg:       #fef3c7;
+  --warn-text:     #92400e;
+  --bg:            #f1f5f9;
+  --card:          #ffffff;
+  --border:        #e2e8f0;
+  --border-focus:  #93c5fd;
+  --text:          #0f172a;
+  --text-sub:      #475569;
+  --text-muted:    #94a3b8;
+  --radius:        10px;
+  --radius-sm:     7px;
+  --shadow:        0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.05);
+  --shadow-md:     0 4px 12px rgba(0,0,0,.1);
+}
 
-  .rank-checks { display: flex; gap: 8px; flex-wrap: wrap; padding: 4px 0; }
-  .rank-checks label { display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 13px; }
-  .rank-checks input[type=checkbox] { cursor: pointer; }
+/* ── Base ───────────────────────────────────────────────── */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Noto Sans TC", "PingFang TC",
+               "Microsoft JhengHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.6;
+  min-height: 100vh;
+  -webkit-tap-highlight-color: transparent;
+}
 
-  .btn-clear { padding: 6px 14px; background: #6b7280; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; align-self: flex-end; }
-  .btn-clear:hover { background: #4b5563; }
+/* ── Header ─────────────────────────────────────────────── */
+header {
+  background: linear-gradient(135deg, var(--primary-dark) 0%, #2563eb 100%);
+  color: #fff;
+  padding: 14px 16px env(safe-area-inset-top, 0);
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  box-shadow: 0 2px 10px rgba(30,64,175,.4);
+}
+.header-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.header-icon {
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+header h1 { font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+header p  { font-size: 11px; opacity: .7; margin-top: 1px; }
 
-  .stats { padding: 10px 24px; font-size: 13px; color: #6b7280; background: #fff; border-bottom: 1px solid #e2e8f0; }
-  .stats strong { color: #111; }
+/* ── Page Container ─────────────────────────────────────── */
+.page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 14px 14px 100px;
+}
 
-  .table-wrap { overflow-x: auto; padding: 0 24px 24px; }
-  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-top: 16px; }
-  th { background: #f9fafb; font-weight: 600; text-align: left; padding: 10px 14px; border-bottom: 2px solid #e5e7eb; white-space: nowrap; cursor: pointer; user-select: none; color: #374151; }
-  th:hover { background: #f3f4f6; }
-  th .sort-icon { margin-left: 4px; opacity: 0.4; }
-  th.sorted .sort-icon { opacity: 1; }
-  td { padding: 9px 14px; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
-  tr:last-child td { border-bottom: none; }
-  tr:hover td { background: #f9fafb; }
+/* ── Filter Panel ───────────────────────────────────────── */
+.filter-panel {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
 
-  td.title a { color: #1a56db; text-decoration: none; font-weight: 500; }
-  td.title a:hover { text-decoration: underline; }
-  td.deadline { white-space: nowrap; }
-  td.deadline.soon { color: #dc2626; font-weight: 600; }
-  td.rank { max-width: 160px; }
+/* Filter toggle bar (mobile label) */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  cursor: pointer;
+  user-select: none;
+}
+.filter-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+}
+.filter-bar svg { color: var(--primary); flex-shrink: 0; }
+.filter-active-badge {
+  background: var(--primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 10px;
+  display: none;
+}
+.filter-active-badge.show { display: inline-block; }
+.filter-toggle-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.chevron {
+  font-size: 10px;
+  transition: transform .2s;
+  display: inline-block;
+}
+.chevron.up { transform: rotate(180deg); }
 
-  .badge { display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; }
-  .badge-A { background: #dbeafe; color: #1e40af; }
-  .badge-B { background: #dcfce7; color: #166534; }
-  .badge-other { background: #f3f4f6; color: #374151; }
+/* Filter body */
+.filter-body {
+  border-top: 1px solid var(--border);
+  padding: 14px 16px 16px;
+  display: none;
+}
+.filter-body.open { display: block; }
 
-  .pagination { display: flex; justify-content: center; align-items: center; gap: 8px; padding: 16px 24px; }
-  .page-btn { padding: 6px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; }
-  .page-btn:hover:not(:disabled) { background: #f9fafb; border-color: #1a56db; color: #1a56db; }
-  .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .page-btn.active { background: #1a56db; color: #fff; border-color: #1a56db; }
-  .page-info { font-size: 13px; color: #6b7280; }
+/* Filter grid */
+.filter-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-areas:
+    "kw      kw      kw"
+    "loc     grp     sname"
+    "rank    rank    grade"
+    "actions actions actions";
+  gap: 12px;
+}
 
-  .loading { text-align: center; padding: 60px; color: #9ca3af; font-size: 16px; }
-  .empty { text-align: center; padding: 40px; color: #9ca3af; }
+.fg-kw      { grid-area: kw; }
+.fg-loc     { grid-area: loc; }
+.fg-grp     { grid-area: grp; }
+.fg-sname   { grid-area: sname; }
+.fg-rank    { grid-area: rank; }
+.fg-grade   { grid-area: grade; }
+.fg-actions { grid-area: actions; }
 
-  @media (max-width: 640px) {
-    .filters { padding: 12px; }
-    .table-wrap { padding: 0 12px 16px; }
-    .stats { padding: 8px 12px; }
-    td, th { padding: 8px 10px; }
+.filter-group { display: flex; flex-direction: column; gap: 5px; }
+.filter-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-sub);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+/* Input / Select shared */
+.fi, .fs {
+  padding: 9px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  color: var(--text);
+  background: #fff;
+  width: 100%;
+  transition: border-color .15s, box-shadow .15s;
+}
+.fi:focus, .fs:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(147,197,253,.3);
+}
+/* Custom select arrow */
+.sel-wrap { position: relative; }
+.sel-wrap::after {
+  content: '';
+  position: absolute;
+  right: 11px; top: 50%;
+  transform: translateY(-50%);
+  border: 4px solid transparent;
+  border-top: 5px solid var(--text-muted);
+  pointer-events: none;
+}
+.fs { appearance: none; -webkit-appearance: none; padding-right: 28px; }
+
+/* Rank checkboxes (pill style) */
+.rank-pills { display: flex; flex-wrap: wrap; gap: 7px; padding: 3px 0; }
+.rank-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 13px;
+  border: 1.5px solid var(--border);
+  border-radius: 20px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.rank-pill:hover { border-color: var(--primary); background: var(--primary-bg); }
+.rank-pill.on {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+  color: var(--primary-text);
+  font-weight: 600;
+}
+.rank-pill input[type=checkbox] { display: none; }
+
+/* Grade range */
+.grade-row { display: flex; align-items: center; gap: 6px; }
+.grade-row .sel-wrap { flex: 1; }
+.grade-sep { color: var(--text-muted); font-size: 13px; flex-shrink: 0; }
+
+/* Filter actions row */
+.filter-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.btn-clear {
+  padding: 7px 16px;
+  background: none;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-sub);
+  transition: all .15s;
+}
+.btn-clear:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-bg); }
+.filter-result-hint { font-size: 13px; color: var(--text-muted); }
+.filter-result-hint strong { color: var(--text); }
+
+/* ── Stats Bar ──────────────────────────────────────────── */
+.stats-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: var(--card);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  box-shadow: var(--shadow);
+}
+.stats-bar strong { color: var(--text); font-weight: 600; }
+
+/* ── Loading / Empty ────────────────────────────────────── */
+.state-wrap { text-align: center; padding: 56px 20px; color: var(--text-muted); }
+.spinner {
+  width: 30px; height: 30px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+  margin: 0 auto 12px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.state-icon { font-size: 36px; margin-bottom: 8px; }
+.state-title { font-weight: 600; font-size: 15px; margin-bottom: 4px; color: var(--text-sub); }
+.state-sub { font-size: 12px; }
+
+/* ── Table (Desktop ≥641px) ─────────────────────────────── */
+.table-wrap {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 820px; }
+thead th {
+  background: #f8fafc;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  color: #475569;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  transition: background .12s;
+}
+thead th:hover { background: #f1f5f9; }
+thead th.sorted { color: var(--primary); }
+.sort-ico { margin-left: 3px; font-size: 11px; opacity: .3; }
+thead th.sorted .sort-ico { opacity: 1; }
+tbody td {
+  padding: 9px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: #fafbff; }
+td.td-title a { color: var(--primary); text-decoration: none; font-weight: 500; }
+td.td-title a:hover { text-decoration: underline; }
+td.td-date { white-space: nowrap; font-size: 12px; color: var(--text-sub); }
+td.td-date.soon { color: var(--danger); font-weight: 700; }
+td.td-grade { white-space: nowrap; font-size: 12px; color: var(--text-sub); }
+td.td-rank { font-size: 12px; color: var(--text-sub); max-width: 170px; }
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge-A { background: var(--primary-bg); color: var(--primary-text); }
+.badge-B { background: var(--success-bg); color: var(--success-text); }
+.badge-x { background: #f1f5f9; color: #64748b; }
+
+/* ── Cards (Mobile <641px) ──────────────────────────────── */
+.cards { display: none; flex-direction: column; gap: 10px; }
+.job-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px 15px;
+  border-left: 4px solid var(--border);
+}
+.job-card.soon-card { border-left-color: var(--danger); }
+
+.card-head a {
+  color: var(--primary);
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  line-height: 1.4;
+}
+.card-head a:hover { text-decoration: underline; }
+.card-head span { font-size: 15px; font-weight: 700; color: var(--text); }
+.card-org { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+.card-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 3px 9px;
+  border-radius: 12px;
+  font-size: 11px; font-weight: 500;
+  background: #f1f5f9; color: var(--text-sub);
+}
+.chip-blue { background: var(--primary-bg); color: var(--primary-text); }
+.chip-green { background: var(--success-bg); color: var(--success-text); }
+.chip-grade { background: #fef3c7; color: #92400e; }
+
+.card-rank { font-size: 12px; color: var(--text-sub); margin-top: 9px; }
+
+.card-dates {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+  margin-top: 9px; font-size: 12px; color: var(--text-muted);
+  padding-top: 9px; border-top: 1px solid #f1f5f9;
+}
+.card-date-label { font-weight: 600; color: var(--text-sub); margin-right: 2px; }
+.card-date-arrow { opacity: .4; margin: 0 2px; }
+.card-date-end { font-weight: 500; }
+.card-date-end.soon-text { color: var(--danger); font-weight: 700; }
+.soon-tag {
+  margin-left: 4px;
+  background: var(--danger-bg); color: var(--danger);
+  font-size: 10px; font-weight: 700;
+  padding: 1px 6px; border-radius: 8px;
+}
+
+/* ── Pagination ─────────────────────────────────────────── */
+.pagination {
+  display: flex; justify-content: center; align-items: center;
+  gap: 5px; padding: 20px 0; flex-wrap: wrap;
+}
+.pag-btn {
+  min-width: 38px; height: 38px; padding: 0 10px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  cursor: pointer; font-size: 13px; color: var(--text);
+  transition: all .15s;
+  display: flex; align-items: center; justify-content: center;
+}
+.pag-btn:hover:not(:disabled):not(.active) { border-color: var(--primary); color: var(--primary); }
+.pag-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); font-weight: 700; }
+.pag-btn:disabled { opacity: .35; cursor: not-allowed; }
+.pag-dots { font-size: 13px; color: var(--text-muted); padding: 0 2px; }
+
+/* ── Responsive ─────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .filter-grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "kw      kw"
+      "loc     grp"
+      "sname   sname"
+      "rank    rank"
+      "grade   grade"
+      "actions actions";
   }
+}
+
+@media (max-width: 640px) {
+  /* Single column filters */
+  .filter-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "kw"
+      "loc"
+      "grp"
+      "sname"
+      "rank"
+      "grade"
+      "actions";
+  }
+  /* Desktop table hidden → cards shown */
+  .table-wrap { display: none !important; }
+  .cards { display: flex; }
+  /* Desktop filter bar always open → mobile needs toggle */
+  .filter-bar { display: flex; }
+  header h1 { font-size: 16px; }
+  .page { padding: 10px 12px 80px; }
+}
+
+@media (min-width: 641px) {
+  /* Always show filter body on desktop */
+  .filter-body { display: block !important; }
+  /* Hide mobile toggle UI */
+  .filter-toggle-text { display: none; }
+  .filter-bar { cursor: default; }
+  /* Table visible, cards hidden */
+  .cards { display: none !important; }
+}
 </style>
 </head>
 <body>
 
 <header>
-  <h1>🏛 政府職缺查詢</h1>
-  <p>資料來源：行政院人事行政總處事求人系統，每日更新</p>
-</header>
-
-<div class="filters">
-  <div class="filter-group">
-    <label>關鍵字</label>
-    <input type="text" id="kw" placeholder="職稱、機關、職系..." oninput="filterAndRender()">
-  </div>
-  <div class="filter-group">
-    <label>工作地點</label>
-    <select id="location" onchange="filterAndRender()">
-      <option value="">全部地點</option>
-    </select>
-  </div>
-  <div class="filter-group">
-    <label>職系大分類</label>
-    <select id="sysnam" onchange="filterAndRender()">
-      <option value="">全部</option>
-      <option value="A">行政類</option>
-      <option value="B">技術類</option>
-    </select>
-  </div>
-  <div class="filter-group">
-    <label>官等（可複選）</label>
-    <div class="rank-checks">
-      <label><input type="checkbox" value="1" onchange="filterAndRender()"> 簡任</label>
-      <label><input type="checkbox" value="2" onchange="filterAndRender()"> 薦任</label>
-      <label><input type="checkbox" value="3" onchange="filterAndRender()"> 委任</label>
-      <label><input type="checkbox" value="4" onchange="filterAndRender()"> 其他</label>
+  <div class="header-inner">
+    <div class="header-icon">🏛</div>
+    <div>
+      <h1>政府職缺查詢</h1>
+      <p>資料來源：行政院人事行政總處事求人系統，每日更新</p>
     </div>
   </div>
-  <button class="btn-clear" onclick="clearFilters()">清除篩選</button>
-</div>
+</header>
 
-<div class="stats" id="stats">載入中...</div>
+<div class="page">
 
-<div class="table-wrap">
-  <div id="loading" class="loading">⏳ 載入職缺資料中...</div>
-  <table id="table" style="display:none">
-    <thead>
-      <tr>
-        <th onclick="sortBy('title')">職稱 <span class="sort-icon" id="icon-title">↕</span></th>
-        <th onclick="sortBy('org_name')">機關 <span class="sort-icon" id="icon-org_name">↕</span></th>
-        <th onclick="sortBy('work_place')">工作地點 <span class="sort-icon" id="icon-work_place">↕</span></th>
-        <th>官等</th>
-        <th onclick="sortBy('job_series')">職系 <span class="sort-icon" id="icon-job_series">↕</span></th>
-        <th onclick="sortBy('deadline_end')">截止日 <span class="sort-icon" id="icon-deadline_end" class="sorted">↑</span></th>
-      </tr>
-    </thead>
-    <tbody id="tbody"></tbody>
-  </table>
-</div>
+  <!-- ── Filter Panel ───────────────────────────────────── -->
+  <div class="filter-panel">
+    <div class="filter-bar" id="filterBar" onclick="toggleFilterBody()">
+      <div class="filter-bar-left">
+        <!-- Filter icon -->
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="4" y1="6" x2="20" y2="6"/>
+          <line x1="8" y1="12" x2="16" y2="12"/>
+          <line x1="11" y1="18" x2="13" y2="18"/>
+        </svg>
+        篩選條件
+        <span class="filter-active-badge" id="activeBadge"></span>
+      </div>
+      <div class="filter-toggle-text">
+        <span id="toggleLabel">收合</span>
+        <span class="chevron up" id="chevron">▼</span>
+      </div>
+    </div>
 
-<div class="pagination" id="pagination"></div>
+    <div class="filter-body open" id="filterBody">
+      <div class="filter-grid">
+
+        <!-- 關鍵字 -->
+        <div class="filter-group fg-kw">
+          <label class="filter-label">🔍 關鍵字</label>
+          <input class="fi" type="text" id="kw"
+            placeholder="搜尋職稱、機關名稱、資格條件..."
+            oninput="onFilterChange()">
+        </div>
+
+        <!-- 工作地點 -->
+        <div class="filter-group fg-loc">
+          <label class="filter-label">📍 工作地點</label>
+          <div class="sel-wrap">
+            <select class="fs" id="location" onchange="onFilterChange()">
+              <option value="">全部地點</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 職系大分類 -->
+        <div class="filter-group fg-grp">
+          <label class="filter-label">📂 職系大分類</label>
+          <div class="sel-wrap">
+            <select class="fs" id="sysnamGrp" onchange="onSysnamGrpChange()">
+              <option value="">不限</option>
+              <option value="A">行政類</option>
+              <option value="B">技術類</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 職系細項 -->
+        <div class="filter-group fg-sname">
+          <label class="filter-label">📋 職系細項</label>
+          <div class="sel-wrap">
+            <select class="fs" id="sysnamName" onchange="onFilterChange()">
+              <option value="">全部職系</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 官等（複選 pill） -->
+        <div class="filter-group fg-rank">
+          <label class="filter-label">🎖 官等（可複選）</label>
+          <div class="rank-pills">
+            <label class="rank-pill" id="rp1" onclick="toggleRank('1',this)">
+              <input type="checkbox" value="1"> 簡任
+            </label>
+            <label class="rank-pill" id="rp2" onclick="toggleRank('2',this)">
+              <input type="checkbox" value="2"> 薦任
+            </label>
+            <label class="rank-pill" id="rp3" onclick="toggleRank('3',this)">
+              <input type="checkbox" value="3"> 委任
+            </label>
+            <label class="rank-pill" id="rp4" onclick="toggleRank('4',this)">
+              <input type="checkbox" value="4"> 其他
+            </label>
+          </div>
+        </div>
+
+        <!-- 職等範圍 -->
+        <div class="filter-group fg-grade">
+          <label class="filter-label">📊 職等範圍</label>
+          <div class="grade-row">
+            <div class="sel-wrap">
+              <select class="fs" id="gradeMin" onchange="onFilterChange()">
+                <option value="0">最低職等</option>
+              </select>
+            </div>
+            <span class="grade-sep">至</span>
+            <div class="sel-wrap">
+              <select class="fs" id="gradeMax" onchange="onFilterChange()">
+                <option value="0">最高職等</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="filter-group fg-actions">
+          <div class="filter-actions">
+            <button class="btn-clear" onclick="clearFilters()">✕ 清除篩選</button>
+            <div class="filter-result-hint" id="filterHint">載入中…</div>
+          </div>
+        </div>
+
+      </div><!-- /filter-grid -->
+    </div><!-- /filter-body -->
+  </div><!-- /filter-panel -->
+
+  <!-- ── Stats Bar ──────────────────────────────────────── -->
+  <div class="stats-bar" id="statsBar">
+    <span id="statsText">載入中…</span>
+    <span id="statsPage"></span>
+  </div>
+
+  <!-- ── Loading ────────────────────────────────────────── -->
+  <div class="state-wrap" id="loadingWrap">
+    <div class="spinner"></div>
+    <div>載入職缺資料中…</div>
+  </div>
+
+  <!-- ── Table (Desktop) ───────────────────────────────── -->
+  <div class="table-wrap" id="tableWrap" style="display:none">
+    <table>
+      <thead>
+        <tr>
+          <th onclick="sortBy('title')">職稱<span class="sort-ico" id="si-title">↕</span></th>
+          <th onclick="sortBy('work_place')">地點<span class="sort-ico" id="si-work_place">↕</span></th>
+          <th onclick="sortBy('rank_type')">官等<span class="sort-ico" id="si-rank_type">↕</span></th>
+          <th onclick="sortBy('rank_grade_min')">職等<span class="sort-ico" id="si-rank_grade_min">↕</span></th>
+          <th onclick="sortBy('sysnam_grp')">職系<span class="sort-ico" id="si-sysnam_grp">↕</span></th>
+          <th onclick="sortBy('job_series')">職系細項<span class="sort-ico" id="si-job_series">↕</span></th>
+          <th onclick="sortBy('deadline_start')">開始日<span class="sort-ico" id="si-deadline_start">↕</span></th>
+          <th onclick="sortBy('deadline_end')">截止日<span class="sort-ico sorted" id="si-deadline_end">↑</span></th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <!-- ── Cards (Mobile) ───────────────────────────────────── -->
+  <div class="cards" id="cards"></div>
+
+  <!-- ── Empty State ──────────────────────────────────────── -->
+  <div class="state-wrap" id="emptyWrap" style="display:none">
+    <div class="state-icon">🔍</div>
+    <div class="state-title">沒有符合條件的職缺</div>
+    <div class="state-sub">請嘗試放寬篩選條件</div>
+  </div>
+
+  <!-- ── Pagination ────────────────────────────────────────── -->
+  <div class="pagination" id="pagination"></div>
+
+</div><!-- /page -->
 
 <script>
+/* ── State ─────────────────────────────────────────────── */
 const PAGE_SIZE = 50;
 let allJobs = [];
 let filtered = [];
+let curPage  = 1;
 let sortField = 'deadline_end';
-let sortAsc = true;
-let currentPage = 1;
+let sortAsc   = true;
+let activeRanks = new Set();        // selected rank codes
+let sysnamMap   = {};               // grp → [series names]
+let filterBodyOpen = true;
 
-// 載入資料
+/* ── Init ──────────────────────────────────────────────── */
+(function initGrades() {
+  const mn = document.getElementById('gradeMin');
+  const mx = document.getElementById('gradeMax');
+  for (let i = 1; i <= 14; i++) {
+    mn.add(new Option(`第 ${i} 職等`, i));
+    mx.add(new Option(`第 ${i} 職等`, i));
+  }
+})();
+
+/* ── Load data ─────────────────────────────────────────── */
 fetch('/api/jobs')
   .then(r => r.json())
   .then(data => {
     allJobs = data;
-    buildLocationOptions();
-    filterAndRender();
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('table').style.display = 'table';
+    buildDropdowns();
+    applyFilters();
+    document.getElementById('loadingWrap').style.display = 'none';
+    document.getElementById('tableWrap').style.display  = '';
   })
-  .catch(e => {
-    document.getElementById('loading').textContent = '❌ 載入失敗，請重新整理';
+  .catch(() => {
+    document.getElementById('loadingWrap').innerHTML =
+      '<div class="state-icon">❌</div><div class="state-title" style="color:#dc2626">載入失敗</div><div class="state-sub">請重新整理頁面</div>';
   });
 
-function buildLocationOptions() {
-  const sel = document.getElementById('location');
-  const places = [...new Set(allJobs.map(j => j.work_place).filter(Boolean))].sort();
-  places.forEach(p => {
-    const opt = document.createElement('option');
-    opt.value = p;
-    opt.textContent = p;
-    sel.appendChild(opt);
+/* ── Build dropdown options ────────────────────────────── */
+function buildDropdowns() {
+  // Location
+  const locSel = document.getElementById('location');
+  [...new Set(allJobs.map(j => j.work_place).filter(Boolean))].sort()
+    .forEach(p => locSel.add(new Option(p, p)));
+
+  // sysnam map: grp → sorted unique series names
+  sysnamMap = { A: new Set(), B: new Set() };
+  allJobs.forEach(j => {
+    if (j.job_series && j.sysnam_grp)
+      (sysnamMap[j.sysnam_grp] = sysnamMap[j.sysnam_grp] || new Set()).add(j.job_series);
+    else if (j.job_series)
+      (sysnamMap[''] = sysnamMap[''] || new Set()).add(j.job_series);
   });
+  // Convert Sets to sorted arrays
+  Object.keys(sysnamMap).forEach(k => sysnamMap[k] = [...sysnamMap[k]].sort());
+  // All = union of all groups
+  sysnamMap[''] = [...new Set(Object.values(sysnamMap).flat())].sort();
+
+  buildSysnamDropdown('');
 }
 
-function getCheckedRanks() {
-  return [...document.querySelectorAll('.rank-checks input:checked')].map(c => c.value);
+function buildSysnamDropdown(grp) {
+  const sel = document.getElementById('sysnamName');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">全部職系</option>';
+  (sysnamMap[grp] || []).forEach(n => sel.add(new Option(n, n)));
+  if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
 }
 
-function filterAndRender() {
-  const kw = document.getElementById('kw').value.trim().toLowerCase();
-  const loc = document.getElementById('location').value;
-  const sys = document.getElementById('sysnam').value;
-  const ranks = getCheckedRanks();
+/* ── Filter events ─────────────────────────────────────── */
+function onSysnamGrpChange() {
+  buildSysnamDropdown(document.getElementById('sysnamGrp').value);
+  onFilterChange();
+}
+
+function toggleRank(code, label) {
+  if (activeRanks.has(code)) { activeRanks.delete(code); label.classList.remove('on'); }
+  else                        { activeRanks.add(code);    label.classList.add('on');   }
+  onFilterChange();
+}
+
+function onFilterChange() {
+  curPage = 1;
+  applyFilters();
+  updateActiveBadge();
+}
+
+/* ── Core filter + sort ────────────────────────────────── */
+function applyFilters() {
+  const kw       = document.getElementById('kw').value.trim().toLowerCase();
+  const loc      = document.getElementById('location').value;
+  const grp      = document.getElementById('sysnamGrp').value;
+  const sname    = document.getElementById('sysnamName').value;
+  const gradeMin = +document.getElementById('gradeMin').value || 0;
+  const gradeMax = +document.getElementById('gradeMax').value || 0;
 
   filtered = allJobs.filter(j => {
-    if (kw && !(`${j.title} ${j.org_name} ${j.job_series}`).toLowerCase().includes(kw)) return false;
+    // Keyword: search title + org + job_series + rank_type
+    if (kw && !`${j.title} ${j.org_name} ${j.job_series} ${j.rank_type}`.toLowerCase().includes(kw))
+      return false;
+    // Location
     if (loc && j.work_place !== loc) return false;
-    if (sys) {
-      if (sys === 'A' && j.sysnam_grp !== 'A' && j.sysnam_grp !== '') return false;
-      if (sys === 'B' && j.sysnam_grp !== 'B') return false;
+    // Sysnam group
+    if (grp && j.sysnam_grp !== grp) return false;
+    // Sysnam name (細項)
+    if (sname && j.job_series !== sname) return false;
+    // Rank types (OR logic)
+    if (activeRanks.size > 0) {
+      const codes = (j.rank_type_codes || '').split(',').map(c => c.trim()).filter(Boolean);
+      if (!codes.some(c => activeRanks.has(c))) return false;
     }
-    if (ranks.length > 0) {
-      const codes = (j.rank_type_codes || '').split(',').map(c => c.trim());
-      if (!ranks.some(r => codes.includes(r))) return false;
+    // Grade range (overlap logic)
+    if (gradeMin > 0 || gradeMax > 0) {
+      const jn = j.rank_grade_min || 0, jx = j.rank_grade_max || 0;
+      // 0/0 means unknown → always include
+      if (jn !== 0 || jx !== 0) {
+        const effMin = jn || jx || 1;
+        const effMax = jx || jn || 14;
+        const uMin   = gradeMin || 1;
+        const uMax   = gradeMax || 14;
+        if (effMax < uMin || effMin > uMax) return false;
+      }
     }
     return true;
   });
 
-  // 排序
+  // Sort
   filtered.sort((a, b) => {
-    let va = a[sortField] || '', vb = b[sortField] || '';
-    if (sortField === 'deadline_end') {
+    let va = a[sortField], vb = b[sortField];
+    if (sortField === 'deadline_end' || sortField === 'deadline_start') {
       va = va || '9999-12-31'; vb = vb || '9999-12-31';
-    }
-    if (va < vb) return sortAsc ? -1 : 1;
-    if (va > vb) return sortAsc ? 1 : -1;
-    return 0;
-  });
-
-  currentPage = 1;
-  renderPage();
-}
-
-function renderPage() {
-  const total = filtered.length;
-  const start = (currentPage - 1) * PAGE_SIZE;
-  const end = Math.min(start + PAGE_SIZE, total);
-  const page = filtered.slice(start, end);
-
-  // stats
-  const statsEl = document.getElementById('stats');
-  statsEl.innerHTML = `共 <strong>${allJobs.length}</strong> 筆職缺，篩選後 <strong>${total}</strong> 筆，顯示第 <strong>${start + 1}–${end}</strong> 筆`;
-
-  // tbody
-  const tbody = document.getElementById('tbody');
-  if (page.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty">沒有符合條件的職缺</td></tr>';
-  } else {
-    tbody.innerHTML = page.map(j => {
-      const badge = j.sysnam_grp === 'A' ? 'badge-A'
-                  : j.sysnam_grp === 'B' ? 'badge-B' : 'badge-other';
-      const seriesLabel = j.job_series
-        ? `<span class="badge ${badge}">${esc(j.job_series)}</span>`
-        : '';
-      const deadlineSoon = j.deadline_end && j.deadline_end <= daysFromNow(7);
-      const titleCell = j.job_url
-        ? `<a href="${esc(j.job_url)}" target="_blank" rel="noopener">${esc(j.title)}</a>`
-        : esc(j.title);
-      return `<tr>
-        <td class="title">${titleCell}</td>
-        <td>${esc(j.org_name)}</td>
-        <td>${esc(j.work_place)}</td>
-        <td class="rank">${esc(j.rank_type)}</td>
-        <td>${seriesLabel}</td>
-        <td class="deadline${deadlineSoon ? ' soon' : ''}">${esc(j.deadline_end)}</td>
-      </tr>`;
-    }).join('');
-  }
-
-  renderPagination(total);
-}
-
-function renderPagination(total) {
-  const totalPages = Math.ceil(total / PAGE_SIZE);
-  const pag = document.getElementById('pagination');
-  if (totalPages <= 1) { pag.innerHTML = ''; return; }
-
-  let html = `<button class="page-btn" onclick="goPage(${currentPage-1})" ${currentPage===1?'disabled':''}>‹ 上一頁</button>`;
-  // 顯示最多 7 個頁碼
-  const range = pageRange(currentPage, totalPages);
-  range.forEach(p => {
-    if (p === '...') {
-      html += `<span class="page-info">…</span>`;
+    } else if (sortField === 'rank_grade_min') {
+      va = va || 999; vb = vb || 999;
     } else {
-      html += `<button class="page-btn${p===currentPage?' active':''}" onclick="goPage(${p})">${p}</button>`;
+      va = String(va || ''); vb = String(vb || '');
     }
+    return va < vb ? (sortAsc ? -1 : 1) : va > vb ? (sortAsc ? 1 : -1) : 0;
   });
-  html += `<button class="page-btn" onclick="goPage(${currentPage+1})" ${currentPage===totalPages?'disabled':''}>下一頁 ›</button>`;
-  html += `<span class="page-info">第 ${currentPage} / ${totalPages} 頁</span>`;
-  pag.innerHTML = html;
+
+  renderPage();
+  updateStats();
 }
 
-function pageRange(cur, total) {
-  if (total <= 7) return Array.from({length: total}, (_, i) => i + 1);
+/* ── Render current page ───────────────────────────────── */
+function renderPage() {
+  const start    = (curPage - 1) * PAGE_SIZE;
+  const end      = Math.min(start + PAGE_SIZE, filtered.length);
+  const pageData = filtered.slice(start, end);
+
+  renderTable(pageData);
+  renderCards(pageData);
+  renderPagination();
+
+  const isEmpty = filtered.length === 0;
+  document.getElementById('emptyWrap').style.display = isEmpty ? '' : 'none';
+  document.getElementById('tableWrap').style.display = isEmpty ? 'none' : '';
+}
+
+/* ── Desktop table ─────────────────────────────────────── */
+function renderTable(data) {
+  document.getElementById('tbody').innerHTML = data.map(j => {
+    const grade = fmtGrade(j.rank_grade_min, j.rank_grade_max);
+    const badge = j.sysnam_grp === 'A' ? '<span class="badge badge-A">行政類</span>'
+                : j.sysnam_grp === 'B' ? '<span class="badge badge-B">技術類</span>'
+                : '<span class="badge badge-x">—</span>';
+    const soon  = isSoon(j.deadline_end);
+    const title = j.job_url
+      ? `<a href="${esc(j.job_url)}" target="_blank" rel="noopener">${esc(j.title)}</a>`
+      : esc(j.title);
+    return `<tr>
+      <td class="td-title">${title}</td>
+      <td style="white-space:nowrap">${esc(j.work_place)}</td>
+      <td class="td-rank">${esc(j.rank_type)}</td>
+      <td class="td-grade">${grade}</td>
+      <td>${badge}</td>
+      <td style="font-size:12px;color:var(--text-sub)">${esc(j.job_series) || '—'}</td>
+      <td class="td-date">${esc(j.deadline_start) || '—'}</td>
+      <td class="td-date${soon ? ' soon' : ''}">${esc(j.deadline_end) || '—'}${soon ? ' ⚠' : ''}</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ── Mobile cards ──────────────────────────────────────── */
+function renderCards(data) {
+  document.getElementById('cards').innerHTML = data.map(j => {
+    const soon  = isSoon(j.deadline_end);
+    const grade = fmtGrade(j.rank_grade_min, j.rank_grade_max);
+    const titleEl = j.job_url
+      ? `<a href="${esc(j.job_url)}" target="_blank" rel="noopener">${esc(j.title)}</a>`
+      : `<span>${esc(j.title)}</span>`;
+    const grpChip = j.sysnam_grp === 'A'
+      ? `<span class="chip chip-blue">行政類</span>`
+      : j.sysnam_grp === 'B'
+      ? `<span class="chip chip-green">技術類</span>` : '';
+    const gradeChip = (j.rank_grade_min || j.rank_grade_max)
+      ? `<span class="chip chip-grade">${grade}</span>` : '';
+    return `<div class="job-card${soon ? ' soon-card' : ''}">
+      <div class="card-head">${titleEl}</div>
+      ${j.org_name ? `<div class="card-org">${esc(j.org_name)}</div>` : ''}
+      <div class="card-chips">
+        ${j.work_place  ? `<span class="chip">📍 ${esc(j.work_place)}</span>` : ''}
+        ${grpChip}
+        ${j.job_series  ? `<span class="chip">${esc(j.job_series)}</span>`    : ''}
+        ${gradeChip}
+      </div>
+      ${j.rank_type ? `<div class="card-rank" style="margin-top:8px">🎖 ${esc(j.rank_type)}</div>` : ''}
+      <div class="card-dates">
+        <span class="card-date-label">受理期間</span>
+        ${esc(j.deadline_start) || '—'}
+        <span class="card-date-arrow">→</span>
+        <span class="card-date-end${soon ? ' soon-text' : ''}">${esc(j.deadline_end) || '—'}</span>
+        ${soon ? '<span class="soon-tag">即將截止</span>' : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ── Pagination ────────────────────────────────────────── */
+function renderPagination() {
+  const total = Math.ceil(filtered.length / PAGE_SIZE);
+  const pag   = document.getElementById('pagination');
+  if (total <= 1) { pag.innerHTML = ''; return; }
+
+  let h = `<button class="pag-btn" onclick="goPage(${curPage-1})" ${curPage===1?'disabled':''}>‹</button>`;
+  pageRange(curPage, total).forEach(p => {
+    if (p === '…') h += `<span class="pag-dots">…</span>`;
+    else h += `<button class="pag-btn${p===curPage?' active':''}" onclick="goPage(${p})">${p}</button>`;
+  });
+  h += `<button class="pag-btn" onclick="goPage(${curPage+1})" ${curPage===total?'disabled':''}>›</button>`;
+  pag.innerHTML = h;
+}
+
+function pageRange(cur, tot) {
+  if (tot <= 7) return Array.from({length: tot}, (_, i) => i+1);
   const r = [];
-  if (cur > 3) { r.push(1); if (cur > 4) r.push('...'); }
-  for (let i = Math.max(1, cur-2); i <= Math.min(total, cur+2); i++) r.push(i);
-  if (cur < total - 2) { if (cur < total - 3) r.push('...'); r.push(total); }
+  if (cur > 3) { r.push(1); if (cur > 4) r.push('…'); }
+  for (let i = Math.max(1, cur-2); i <= Math.min(tot, cur+2); i++) r.push(i);
+  if (cur < tot-2) { if (cur < tot-3) r.push('…'); r.push(tot); }
   return r;
 }
 
 function goPage(n) {
-  if (n < 1 || n > Math.ceil(filtered.length / PAGE_SIZE)) return;
-  currentPage = n;
+  const tot = Math.ceil(filtered.length / PAGE_SIZE);
+  if (n < 1 || n > tot) return;
+  curPage = n;
   renderPage();
-  window.scrollTo(0, 0);
+  updateStats();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
+/* ── Sort ──────────────────────────────────────────────── */
 function sortBy(field) {
-  if (sortField === field) {
-    sortAsc = !sortAsc;
-  } else {
-    sortField = field;
-    sortAsc = (field === 'deadline_end');
-  }
-  // 更新 icon
-  document.querySelectorAll('th').forEach(th => th.classList.remove('sorted'));
-  const icon = document.getElementById(`icon-${field}`);
-  if (icon) {
-    icon.textContent = sortAsc ? '↑' : '↓';
-    icon.closest('th').classList.add('sorted');
-  }
-  // reset other icons
-  ['title','org_name','work_place','job_series','deadline_end'].forEach(f => {
-    if (f !== field) {
-      const el = document.getElementById(`icon-${f}`);
-      if (el) el.textContent = '↕';
-    }
+  if (sortField === field) sortAsc = !sortAsc;
+  else { sortField = field; sortAsc = field.includes('deadline') || field === 'rank_grade_min'; }
+
+  const sortableFields = ['title','work_place','rank_type','rank_grade_min','sysnam_grp','job_series','deadline_start','deadline_end'];
+  sortableFields.forEach(f => {
+    const el = document.getElementById(`si-${f}`);
+    const th = el?.closest('th');
+    if (!el) return;
+    if (f === field) { el.textContent = sortAsc ? '↑' : '↓'; th?.classList.add('sorted'); }
+    else             { el.textContent = '↕';                  th?.classList.remove('sorted'); }
   });
-  currentPage = 1;
-  renderPage();
+
+  curPage = 1;
+  applyFilters();
 }
 
+/* ── Stats ─────────────────────────────────────────────── */
+function updateStats() {
+  const start = (curPage - 1) * PAGE_SIZE + 1;
+  const end   = Math.min(curPage * PAGE_SIZE, filtered.length);
+  document.getElementById('statsText').innerHTML =
+    `共 <strong>${allJobs.length}</strong> 筆・篩選後 <strong>${filtered.length}</strong> 筆`;
+  document.getElementById('statsPage').textContent =
+    filtered.length > 0 ? `第 ${start}–${end} 筆` : '';
+  document.getElementById('filterHint').innerHTML =
+    `篩選後 <strong>${filtered.length}</strong> 筆`;
+}
+
+/* ── Active filter badge ───────────────────────────────── */
+function updateActiveBadge() {
+  let n = 0;
+  if (document.getElementById('kw').value.trim()) n++;
+  if (document.getElementById('location').value)  n++;
+  if (document.getElementById('sysnamGrp').value) n++;
+  if (document.getElementById('sysnamName').value) n++;
+  if (activeRanks.size > 0) n++;
+  if (+document.getElementById('gradeMin').value) n++;
+  if (+document.getElementById('gradeMax').value) n++;
+  const badge = document.getElementById('activeBadge');
+  badge.textContent = n;
+  badge.classList.toggle('show', n > 0);
+}
+
+/* ── Clear filters ─────────────────────────────────────── */
 function clearFilters() {
-  document.getElementById('kw').value = '';
+  document.getElementById('kw').value       = '';
   document.getElementById('location').value = '';
-  document.getElementById('sysnam').value = '';
-  document.querySelectorAll('.rank-checks input').forEach(c => c.checked = false);
-  filterAndRender();
+  document.getElementById('sysnamGrp').value = '';
+  buildSysnamDropdown('');
+  document.getElementById('sysnamName').value = '';
+  document.getElementById('gradeMin').value   = '0';
+  document.getElementById('gradeMax').value   = '0';
+  activeRanks.clear();
+  document.querySelectorAll('.rank-pill').forEach(l => l.classList.remove('on'));
+  onFilterChange();
+}
+
+/* ── Toggle filter body (mobile) ──────────────────────── */
+function toggleFilterBody() {
+  if (window.innerWidth >= 641) return;   // desktop: always open
+  filterBodyOpen = !filterBodyOpen;
+  const body    = document.getElementById('filterBody');
+  const chevron = document.getElementById('chevron');
+  const label   = document.getElementById('toggleLabel');
+  body.classList.toggle('open', filterBodyOpen);
+  chevron.classList.toggle('up', filterBodyOpen);
+  label.textContent = filterBodyOpen ? '收合' : '展開';
+}
+
+/* ── Helpers ───────────────────────────────────────────── */
+function fmtGrade(mn, mx) {
+  if (!mn && !mx) return '不限';
+  if (mn && mx && mn === mx) return `第${mn}職等`;
+  if (mn && mx) return `第${mn}–${mx}職等`;
+  if (mn) return `第${mn}職等起`;
+  return `至第${mx}職等`;
+}
+
+function isSoon(d) {
+  if (!d) return false;
+  const diff = (new Date(d) - new Date()) / 86400000;
+  return diff >= 0 && diff <= 7;
 }
 
 function esc(s) {
-  if (!s) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-function daysFromNow(n) {
-  const d = new Date(); d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  return String(s ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 </script>
 </body>

@@ -36,16 +36,18 @@ def api_jobs():
     jobs = search_jobs(limit=5000)
     return [
         {
-            "title":           j.title,
-            "org_name":        j.org_name,
-            "work_place":      j.work_place,
-            "rank_type":       j.rank_type,
-            "rank_type_codes": j.rank_type_codes,
-            "job_series":      j.job_series,
-            "sysnam_grp":      j.sysnam_grp,
-            "deadline_start":  j.deadline_start,
-            "deadline_end":    j.deadline_end,
-            "job_url":         j.job_url,
+            "title":            j.title,
+            "org_name":         j.org_name,
+            "work_place":       j.work_place,
+            "rank_type":        j.rank_type,
+            "rank_type_codes":  j.rank_type_codes,
+            "rank_grade_min":   j.rank_grade_min,
+            "rank_grade_max":   j.rank_grade_max,
+            "job_series":       j.job_series,
+            "sysnam_grp":       j.sysnam_grp,
+            "deadline_start":   j.deadline_start,
+            "deadline_end":     j.deadline_end,
+            "job_url":          j.job_url,
         }
         for j in jobs
     ]
