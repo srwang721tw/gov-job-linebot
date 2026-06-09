@@ -5,36 +5,34 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>政府職缺查詢</title>
 <style>
-/* ── Reset ──────────────────────────────────────────────── */
+/* ── Reset ─────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 button, input, select { font-family: inherit; }
 
-/* ── Variables ──────────────────────────────────────────── */
+/* ── Variables ──────────────────────────────────────── */
 :root {
-  --primary:       #1e40af;
-  --primary-dark:  #1e3a8a;
-  --primary-bg:    #dbeafe;
-  --primary-text:  #1e40af;
-  --success-bg:    #dcfce7;
-  --success-text:  #166534;
-  --danger:        #dc2626;
-  --danger-bg:     #fee2e2;
-  --warn-bg:       #fef3c7;
-  --warn-text:     #92400e;
-  --bg:            #f1f5f9;
-  --card:          #ffffff;
-  --border:        #e2e8f0;
-  --border-focus:  #93c5fd;
-  --text:          #0f172a;
-  --text-sub:      #475569;
-  --text-muted:    #94a3b8;
-  --radius:        10px;
-  --radius-sm:     7px;
-  --shadow:        0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.05);
-  --shadow-md:     0 4px 12px rgba(0,0,0,.1);
+  --primary:      #1e40af;
+  --primary-dark: #1e3a8a;
+  --primary-bg:   #dbeafe;
+  --primary-text: #1e40af;
+  --green-bg:     #dcfce7;
+  --green-text:   #166534;
+  --danger:       #dc2626;
+  --danger-bg:    #fee2e2;
+  --bg:           #f1f5f9;
+  --card:         #ffffff;
+  --border:       #e2e8f0;
+  --border-f:     #93c5fd;
+  --text:         #0f172a;
+  --text-sub:     #475569;
+  --text-muted:   #94a3b8;
+  --radius:       10px;
+  --radius-sm:    7px;
+  --shadow:       0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.05);
+  --shadow-lg:    0 8px 24px rgba(0,0,0,.14);
 }
 
-/* ── Base ───────────────────────────────────────────────── */
+/* ── Base ───────────────────────────────────────────── */
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Noto Sans TC", "PingFang TC",
                "Microsoft JhengHei", sans-serif;
@@ -46,86 +44,46 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* ── Header ─────────────────────────────────────────────── */
+/* ── Header ─────────────────────────────────────────── */
 header {
-  background: linear-gradient(135deg, var(--primary-dark) 0%, #2563eb 100%);
+  background: linear-gradient(135deg, var(--primary-dark), #2563eb);
   color: #fff;
   padding: 14px 16px env(safe-area-inset-top, 0);
-  position: sticky;
-  top: 0;
-  z-index: 200;
+  position: sticky; top: 0; z-index: 200;
   box-shadow: 0 2px 10px rgba(30,64,175,.4);
 }
-.header-inner {
-  max-width: 1100px;
-  margin: 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.header-icon {
-  font-size: 22px;
-  line-height: 1;
-  flex-shrink: 0;
-}
+.hdr { max-width: 1200px; margin: 0 auto; display: flex; align-items: center; gap: 11px; }
+.hdr-icon { font-size: 22px; flex-shrink: 0; }
 header h1 { font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
 header p  { font-size: 11px; opacity: .7; margin-top: 1px; }
 
-/* ── Page Container ─────────────────────────────────────── */
-.page {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 14px 14px 100px;
-}
+/* ── Page ───────────────────────────────────────────── */
+.page { max-width: 1200px; margin: 0 auto; padding: 14px 14px 100px; }
 
-/* ── Filter Panel ───────────────────────────────────────── */
+/* ── Filter Panel ───────────────────────────────────── */
 .filter-panel {
   background: var(--card);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   margin-bottom: 12px;
-  overflow: hidden;
+  /* NO overflow:hidden — lets multi-select portal work correctly */
 }
-
-/* Filter toggle bar (mobile label) */
 .filter-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between;
   padding: 12px 16px;
-  cursor: pointer;
-  user-select: none;
+  cursor: pointer; user-select: none;
+  border-radius: var(--radius) var(--radius) 0 0;
 }
-.filter-bar-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  font-size: 14px;
+.filter-bar-l { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
+.filter-bar-l svg { color: var(--primary); flex-shrink: 0; }
+.f-badge {
+  background: var(--primary); color: #fff;
+  font-size: 11px; font-weight: 700;
+  padding: 1px 7px; border-radius: 10px; display: none;
 }
-.filter-bar svg { color: var(--primary); flex-shrink: 0; }
-.filter-active-badge {
-  background: var(--primary);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 1px 7px;
-  border-radius: 10px;
-  display: none;
-}
-.filter-active-badge.show { display: inline-block; }
-.filter-toggle-text {
-  font-size: 12px;
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.chevron {
-  font-size: 10px;
-  transition: transform .2s;
-  display: inline-block;
-}
+.f-badge.show { display: inline-block; }
+.f-toggle { font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 4px; }
+.chevron { font-size: 10px; transition: transform .2s; }
 .chevron.up { transform: rotate(180deg); }
 
 /* Filter body */
@@ -141,133 +99,156 @@ header p  { font-size: 11px; opacity: .7; margin-top: 1px; }
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   grid-template-areas:
-    "kw      kw      kw"
-    "loc     grp     sname"
-    "rank    rank    grade"
-    "actions actions actions";
+    "kw    kw    kw"
+    "loc   grp   sname"
+    "rank  rank  grade"
+    "act   act   act";
   gap: 12px;
 }
-
-.fg-kw      { grid-area: kw; }
-.fg-loc     { grid-area: loc; }
-.fg-grp     { grid-area: grp; }
-.fg-sname   { grid-area: sname; }
-.fg-rank    { grid-area: rank; }
-.fg-grade   { grid-area: grade; }
-.fg-actions { grid-area: actions; }
-
+.fg-kw    { grid-area: kw; }
+.fg-loc   { grid-area: loc; }
+.fg-grp   { grid-area: grp; }
+.fg-sname { grid-area: sname; }
+.fg-rank  { grid-area: rank; }
+.fg-grade { grid-area: grade; }
+.fg-act   { grid-area: act; }
 .filter-group { display: flex; flex-direction: column; gap: 5px; }
-.filter-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-sub);
-  text-transform: uppercase;
-  letter-spacing: .06em;
-}
+.filter-label { font-size: 11px; font-weight: 700; color: var(--text-sub); text-transform: uppercase; letter-spacing: .06em; }
 
-/* Input / Select shared */
+/* Shared input/select */
 .fi, .fs {
   padding: 9px 12px;
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
-  font-size: 14px;
-  color: var(--text);
-  background: #fff;
-  width: 100%;
-  transition: border-color .15s, box-shadow .15s;
+  font-size: 14px; color: var(--text); background: #fff;
+  width: 100%; transition: border-color .15s, box-shadow .15s;
 }
 .fi:focus, .fs:focus {
-  outline: none;
-  border-color: var(--border-focus);
+  outline: none; border-color: var(--border-f);
   box-shadow: 0 0 0 3px rgba(147,197,253,.3);
 }
-/* Custom select arrow */
 .sel-wrap { position: relative; }
 .sel-wrap::after {
-  content: '';
-  position: absolute;
-  right: 11px; top: 50%;
+  content: ''; position: absolute; right: 11px; top: 50%;
   transform: translateY(-50%);
-  border: 4px solid transparent;
-  border-top: 5px solid var(--text-muted);
+  border: 4px solid transparent; border-top: 5px solid var(--text-muted);
   pointer-events: none;
 }
 .fs { appearance: none; -webkit-appearance: none; padding-right: 28px; }
 
-/* Rank checkboxes (pill style) */
+/* Rank pills */
 .rank-pills { display: flex; flex-wrap: wrap; gap: 7px; padding: 3px 0; }
 .rank-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+  display: inline-flex; align-items: center; gap: 5px;
   padding: 6px 13px;
-  border: 1.5px solid var(--border);
-  border-radius: 20px;
-  font-size: 13px;
-  cursor: pointer;
-  user-select: none;
+  border: 1.5px solid var(--border); border-radius: 20px;
+  font-size: 13px; cursor: pointer; user-select: none; white-space: nowrap;
   transition: all .15s;
-  white-space: nowrap;
 }
 .rank-pill:hover { border-color: var(--primary); background: var(--primary-bg); }
-.rank-pill.on {
-  border-color: var(--primary);
-  background: var(--primary-bg);
-  color: var(--primary-text);
-  font-weight: 600;
-}
-.rank-pill input[type=checkbox] { display: none; }
+.rank-pill.on { border-color: var(--primary); background: var(--primary-bg); color: var(--primary-text); font-weight: 600; }
+.rank-pill input { display: none; }
 
 /* Grade range */
 .grade-row { display: flex; align-items: center; gap: 6px; }
 .grade-row .sel-wrap { flex: 1; }
 .grade-sep { color: var(--text-muted); font-size: 13px; flex-shrink: 0; }
 
-/* Filter actions row */
-.filter-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-}
+/* Filter actions */
+.filter-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
 .btn-clear {
-  padding: 7px 16px;
-  background: none;
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--text-sub);
-  transition: all .15s;
+  padding: 7px 16px; background: none;
+  border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+  cursor: pointer; font-size: 13px; color: var(--text-sub); transition: all .15s;
 }
 .btn-clear:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-bg); }
-.filter-result-hint { font-size: 13px; color: var(--text-muted); }
-.filter-result-hint strong { color: var(--text); }
+.filter-hint { font-size: 13px; color: var(--text-muted); }
+.filter-hint strong { color: var(--text); }
 
-/* ── Stats Bar ──────────────────────────────────────────── */
-.stats-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 14px;
+/* ═══════════════════════════════════════════════════════
+   Multi-Select component
+   Dropdown is portaled to <body> to escape overflow:hidden
+═══════════════════════════════════════════════════════ */
+/* Trigger button – same width/look as .fs */
+.ms-btn {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; padding: 9px 12px;
+  border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+  background: #fff; cursor: pointer; text-align: left;
+  font-size: 14px; color: var(--text);
+  transition: border-color .15s, box-shadow .15s;
+}
+.ms-btn:hover { border-color: #9ca3af; }
+.ms-btn.open, .ms-btn:focus {
+  outline: none; border-color: var(--border-f);
+  box-shadow: 0 0 0 3px rgba(147,197,253,.3);
+}
+.ms-txt { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-txt.ph { color: #9ca3af; }
+.ms-arr { color: var(--text-muted); font-size: 10px; margin-left: 8px; flex-shrink: 0; transition: transform .2s; }
+.ms-btn.open .ms-arr { transform: rotate(180deg); }
+
+/* Portal dropdown (appended to body) */
+.ms-dropdown {
+  position: absolute; z-index: 9999;
   background: var(--card);
+  border: 1.5px solid var(--border-f);
   border-radius: var(--radius-sm);
-  margin-bottom: 12px;
-  font-size: 12px;
-  color: var(--text-muted);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  display: none; flex-direction: column;
+}
+.ms-srow { padding: 8px 10px 6px; border-bottom: 1px solid var(--border); }
+.ms-si {
+  width: 100%; padding: 6px 10px;
+  border: 1.5px solid var(--border); border-radius: 6px;
+  font-size: 13px; background: var(--bg);
+}
+.ms-si:focus { outline: none; border-color: var(--border-f); }
+.ms-arow {
+  padding: 6px 12px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px; color: var(--text-muted);
+}
+.ms-clr { background: none; border: none; cursor: pointer; color: var(--primary); font-size: 12px; font-weight: 500; }
+.ms-list { max-height: 210px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.ms-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 12px; cursor: pointer; font-size: 13px;
+  transition: background .1s; user-select: none;
+}
+.ms-item:hover { background: var(--bg); }
+.ms-item.on { background: var(--primary-bg); color: var(--primary-text); }
+.ms-ck {
+  width: 16px; height: 16px; flex-shrink: 0;
+  border: 2px solid #cbd5e1; border-radius: 4px;
+  position: relative; transition: all .15s;
+}
+.ms-item.on .ms-ck { background: var(--primary); border-color: var(--primary); }
+.ms-item.on .ms-ck::after {
+  content: ''; position: absolute;
+  left: 2px; top: 0px; width: 8px; height: 5px;
+  border-left: 2.5px solid #fff; border-bottom: 2.5px solid #fff;
+  transform: rotate(-45deg);
+}
+.ms-empty { padding: 14px; text-align: center; color: var(--text-muted); font-size: 13px; }
+
+/* ── Stats Bar ──────────────────────────────────────── */
+.stats-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--card);
+  border-radius: var(--radius-sm); margin-bottom: 12px;
+  font-size: 12px; color: var(--text-muted); box-shadow: var(--shadow);
 }
 .stats-bar strong { color: var(--text); font-weight: 600; }
 
-/* ── Loading / Empty ────────────────────────────────────── */
+/* ── State (loading / empty) ────────────────────────── */
 .state-wrap { text-align: center; padding: 56px 20px; color: var(--text-muted); }
 .spinner {
   width: 30px; height: 30px;
-  border: 3px solid var(--border);
-  border-top-color: var(--primary);
-  border-radius: 50%;
-  animation: spin .7s linear infinite;
+  border: 3px solid var(--border); border-top-color: var(--primary);
+  border-radius: 50%; animation: spin .7s linear infinite;
   margin: 0 auto 12px;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -275,176 +256,104 @@ header p  { font-size: 11px; opacity: .7; margin-top: 1px; }
 .state-title { font-weight: 600; font-size: 15px; margin-bottom: 4px; color: var(--text-sub); }
 .state-sub { font-size: 12px; }
 
-/* ── Table (Desktop ≥641px) ─────────────────────────────── */
+/* ── Table (Desktop ≥641px) ─────────────────────────── */
 .table-wrap {
-  background: var(--card);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  overflow: hidden;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+  overflow: hidden; overflow-x: auto; -webkit-overflow-scrolling: touch;
 }
-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 820px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 1000px; }
 thead th {
-  background: #f8fafc;
-  font-weight: 600;
-  text-align: left;
-  padding: 10px 12px;
-  border-bottom: 2px solid var(--border);
-  white-space: nowrap;
-  cursor: pointer;
-  user-select: none;
-  color: #475569;
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  transition: background .12s;
+  background: #f8fafc; font-weight: 600; text-align: left;
+  padding: 10px 12px; border-bottom: 2px solid var(--border);
+  white-space: nowrap; cursor: pointer; user-select: none; color: #475569;
+  position: sticky; top: 0; z-index: 10; transition: background .12s;
 }
 thead th:hover { background: #f1f5f9; }
 thead th.sorted { color: var(--primary); }
-.sort-ico { margin-left: 3px; font-size: 11px; opacity: .3; }
-thead th.sorted .sort-ico { opacity: 1; }
-tbody td {
-  padding: 9px 12px;
-  border-bottom: 1px solid #f1f5f9;
-  vertical-align: middle;
-}
+.si { margin-left: 3px; font-size: 11px; opacity: .3; }
+thead th.sorted .si { opacity: 1; }
+tbody td { padding: 9px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover td { background: #fafbff; }
-td.td-title a { color: var(--primary); text-decoration: none; font-weight: 500; }
-td.td-title a:hover { text-decoration: underline; }
-td.td-date { white-space: nowrap; font-size: 12px; color: var(--text-sub); }
-td.td-date.soon { color: var(--danger); font-weight: 700; }
-td.td-grade { white-space: nowrap; font-size: 12px; color: var(--text-sub); }
-td.td-rank { font-size: 12px; color: var(--text-sub); max-width: 170px; }
-
-/* Badges */
-.badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-}
+.td-title a { color: var(--primary); text-decoration: none; font-weight: 500; }
+.td-title a:hover { text-decoration: underline; }
+.td-date { white-space: nowrap; font-size: 12px; color: var(--text-sub); }
+.td-date.soon { color: var(--danger); font-weight: 700; }
+.td-grade { white-space: nowrap; font-size: 12px; color: var(--text-sub); }
+.td-org { font-size: 12px; color: var(--text-sub); max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.td-rank { font-size: 12px; color: var(--text-sub); max-width: 160px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; white-space: nowrap; }
 .badge-A { background: var(--primary-bg); color: var(--primary-text); }
-.badge-B { background: var(--success-bg); color: var(--success-text); }
+.badge-B { background: var(--green-bg);   color: var(--green-text); }
 .badge-x { background: #f1f5f9; color: #64748b; }
 
-/* ── Cards (Mobile <641px) ──────────────────────────────── */
+/* ── Cards (Mobile <641px) ──────────────────────────── */
 .cards { display: none; flex-direction: column; gap: 10px; }
 .job-card {
-  background: var(--card);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 14px 15px;
-  border-left: 4px solid var(--border);
+  background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 14px 15px; border-left: 4px solid var(--border);
 }
 .job-card.soon-card { border-left-color: var(--danger); }
-
-.card-head a {
-  color: var(--primary);
-  font-size: 15px;
-  font-weight: 700;
-  text-decoration: none;
-  line-height: 1.4;
-}
+.card-head a { color: var(--primary); font-size: 15px; font-weight: 700; text-decoration: none; line-height: 1.4; }
 .card-head a:hover { text-decoration: underline; }
 .card-head span { font-size: 15px; font-weight: 700; color: var(--text); }
 .card-org { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
-
 .card-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
-.chip {
-  display: inline-flex; align-items: center; gap: 3px;
-  padding: 3px 9px;
-  border-radius: 12px;
-  font-size: 11px; font-weight: 500;
-  background: #f1f5f9; color: var(--text-sub);
-}
-.chip-blue { background: var(--primary-bg); color: var(--primary-text); }
-.chip-green { background: var(--success-bg); color: var(--success-text); }
-.chip-grade { background: #fef3c7; color: #92400e; }
-
-.card-rank { font-size: 12px; color: var(--text-sub); margin-top: 9px; }
-
+.chip { display: inline-flex; align-items: center; gap: 3px; padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 500; background: #f1f5f9; color: var(--text-sub); }
+.chip-blue  { background: var(--primary-bg); color: var(--primary-text); }
+.chip-green { background: var(--green-bg);   color: var(--green-text); }
+.chip-gold  { background: #fef3c7; color: #92400e; }
+.card-rank  { font-size: 12px; color: var(--text-sub); margin-top: 9px; }
 .card-dates {
   display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
-  margin-top: 9px; font-size: 12px; color: var(--text-muted);
-  padding-top: 9px; border-top: 1px solid #f1f5f9;
+  margin-top: 9px; padding-top: 9px; border-top: 1px solid #f1f5f9;
+  font-size: 12px; color: var(--text-muted);
 }
-.card-date-label { font-weight: 600; color: var(--text-sub); margin-right: 2px; }
-.card-date-arrow { opacity: .4; margin: 0 2px; }
-.card-date-end { font-weight: 500; }
-.card-date-end.soon-text { color: var(--danger); font-weight: 700; }
-.soon-tag {
-  margin-left: 4px;
-  background: var(--danger-bg); color: var(--danger);
-  font-size: 10px; font-weight: 700;
-  padding: 1px 6px; border-radius: 8px;
-}
+.card-dlabel { font-weight: 600; color: var(--text-sub); margin-right: 2px; }
+.card-dend  { font-weight: 500; }
+.card-dend.soon-t { color: var(--danger); font-weight: 700; }
+.soon-tag { margin-left: 4px; background: var(--danger-bg); color: var(--danger); font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; }
 
-/* ── Pagination ─────────────────────────────────────────── */
-.pagination {
-  display: flex; justify-content: center; align-items: center;
-  gap: 5px; padding: 20px 0; flex-wrap: wrap;
-}
+/* ── Pagination ─────────────────────────────────────── */
+.pagination { display: flex; justify-content: center; align-items: center; gap: 5px; padding: 20px 0; flex-wrap: wrap; }
 .pag-btn {
   min-width: 38px; height: 38px; padding: 0 10px;
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--card);
-  cursor: pointer; font-size: 13px; color: var(--text);
-  transition: all .15s;
-  display: flex; align-items: center; justify-content: center;
+  border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--card); cursor: pointer; font-size: 13px; color: var(--text);
+  transition: all .15s; display: flex; align-items: center; justify-content: center;
 }
 .pag-btn:hover:not(:disabled):not(.active) { border-color: var(--primary); color: var(--primary); }
 .pag-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); font-weight: 700; }
 .pag-btn:disabled { opacity: .35; cursor: not-allowed; }
 .pag-dots { font-size: 13px; color: var(--text-muted); padding: 0 2px; }
 
-/* ── Responsive ─────────────────────────────────────────── */
+/* ── Responsive ─────────────────────────────────────── */
 @media (max-width: 900px) {
   .filter-grid {
     grid-template-columns: 1fr 1fr;
     grid-template-areas:
-      "kw      kw"
-      "loc     grp"
-      "sname   sname"
-      "rank    rank"
-      "grade   grade"
-      "actions actions";
+      "kw    kw"
+      "loc   grp"
+      "sname sname"
+      "rank  rank"
+      "grade grade"
+      "act   act";
   }
 }
-
 @media (max-width: 640px) {
-  /* Single column filters */
   .filter-grid {
     grid-template-columns: 1fr;
-    grid-template-areas:
-      "kw"
-      "loc"
-      "grp"
-      "sname"
-      "rank"
-      "grade"
-      "actions";
+    grid-template-areas: "kw" "loc" "grp" "sname" "rank" "grade" "act";
   }
-  /* Desktop table hidden → cards shown */
   .table-wrap { display: none !important; }
   .cards { display: flex; }
-  /* Desktop filter bar always open → mobile needs toggle */
-  .filter-bar { display: flex; }
   header h1 { font-size: 16px; }
   .page { padding: 10px 12px 80px; }
 }
-
 @media (min-width: 641px) {
-  /* Always show filter body on desktop */
   .filter-body { display: block !important; }
-  /* Hide mobile toggle UI */
-  .filter-toggle-text { display: none; }
+  .f-toggle { display: none; }
   .filter-bar { cursor: default; }
-  /* Table visible, cards hidden */
   .cards { display: none !important; }
 }
 </style>
@@ -452,8 +361,8 @@ td.td-rank { font-size: 12px; color: var(--text-sub); max-width: 170px; }
 <body>
 
 <header>
-  <div class="header-inner">
-    <div class="header-icon">🏛</div>
+  <div class="hdr">
+    <div class="hdr-icon">🏛</div>
     <div>
       <h1>政府職缺查詢</h1>
       <p>資料來源：行政院人事行政總處事求人系統，每日更新</p>
@@ -463,20 +372,17 @@ td.td-rank { font-size: 12px; color: var(--text-sub); max-width: 170px; }
 
 <div class="page">
 
-  <!-- ── Filter Panel ───────────────────────────────────── -->
+  <!-- Filter Panel -->
   <div class="filter-panel">
     <div class="filter-bar" id="filterBar" onclick="toggleFilterBody()">
-      <div class="filter-bar-left">
-        <!-- Filter icon -->
+      <div class="filter-bar-l">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="4" y1="6" x2="20" y2="6"/>
-          <line x1="8" y1="12" x2="16" y2="12"/>
-          <line x1="11" y1="18" x2="13" y2="18"/>
+          <line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="11" y1="18" x2="13" y2="18"/>
         </svg>
         篩選條件
-        <span class="filter-active-badge" id="activeBadge"></span>
+        <span class="f-badge" id="activeBadge"></span>
       </div>
-      <div class="filter-toggle-text">
+      <div class="f-toggle">
         <span id="toggleLabel">收合</span>
         <span class="chevron up" id="chevron">▼</span>
       </div>
@@ -488,26 +394,20 @@ td.td-rank { font-size: 12px; color: var(--text-sub); max-width: 170px; }
         <!-- 關鍵字 -->
         <div class="filter-group fg-kw">
           <label class="filter-label">🔍 關鍵字</label>
-          <input class="fi" type="text" id="kw"
-            placeholder="搜尋職稱、機關名稱、資格條件..."
-            oninput="onFilterChange()">
+          <input class="fi" type="text" id="kw" placeholder="搜尋職稱、機關名稱、資格條件…" oninput="onFc()">
         </div>
 
-        <!-- 工作地點 -->
+        <!-- 地點（多選）-->
         <div class="filter-group fg-loc">
-          <label class="filter-label">📍 工作地點</label>
-          <div class="sel-wrap">
-            <select class="fs" id="location" onchange="onFilterChange()">
-              <option value="">全部地點</option>
-            </select>
-          </div>
+          <label class="filter-label">📍 工作地點（可複選）</label>
+          <div id="locMs"></div><!-- MultiSelect mount point -->
         </div>
 
         <!-- 職系大分類 -->
         <div class="filter-group fg-grp">
           <label class="filter-label">📂 職系大分類</label>
           <div class="sel-wrap">
-            <select class="fs" id="sysnamGrp" onchange="onSysnamGrpChange()">
+            <select class="fs" id="sysnamGrp" onchange="onGrpChange()">
               <option value="">不限</option>
               <option value="A">行政類</option>
               <option value="B">技術類</option>
@@ -515,32 +415,20 @@ td.td-rank { font-size: 12px; color: var(--text-sub); max-width: 170px; }
           </div>
         </div>
 
-        <!-- 職系細項 -->
+        <!-- 職系細項（多選）-->
         <div class="filter-group fg-sname">
-          <label class="filter-label">📋 職系細項</label>
-          <div class="sel-wrap">
-            <select class="fs" id="sysnamName" onchange="onFilterChange()">
-              <option value="">全部職系</option>
-            </select>
-          </div>
+          <label class="filter-label">📋 職系細項（可複選）</label>
+          <div id="snameMs"></div><!-- MultiSelect mount point -->
         </div>
 
-        <!-- 官等（複選 pill） -->
+        <!-- 官等（pills）-->
         <div class="filter-group fg-rank">
           <label class="filter-label">🎖 官等（可複選）</label>
           <div class="rank-pills">
-            <label class="rank-pill" id="rp1" onclick="toggleRank('1',this)">
-              <input type="checkbox" value="1"> 簡任
-            </label>
-            <label class="rank-pill" id="rp2" onclick="toggleRank('2',this)">
-              <input type="checkbox" value="2"> 薦任
-            </label>
-            <label class="rank-pill" id="rp3" onclick="toggleRank('3',this)">
-              <input type="checkbox" value="3"> 委任
-            </label>
-            <label class="rank-pill" id="rp4" onclick="toggleRank('4',this)">
-              <input type="checkbox" value="4"> 其他
-            </label>
+            <label class="rank-pill" onclick="toggleRank('1',this)"><input type="checkbox"> 簡任</label>
+            <label class="rank-pill" onclick="toggleRank('2',this)"><input type="checkbox"> 薦任</label>
+            <label class="rank-pill" onclick="toggleRank('3',this)"><input type="checkbox"> 委任</label>
+            <label class="rank-pill" onclick="toggleRank('4',this)"><input type="checkbox"> 其他</label>
           </div>
         </div>
 
@@ -548,101 +436,229 @@ td.td-rank { font-size: 12px; color: var(--text-sub); max-width: 170px; }
         <div class="filter-group fg-grade">
           <label class="filter-label">📊 職等範圍</label>
           <div class="grade-row">
-            <div class="sel-wrap">
-              <select class="fs" id="gradeMin" onchange="onFilterChange()">
-                <option value="0">最低職等</option>
-              </select>
-            </div>
+            <div class="sel-wrap"><select class="fs" id="gradeMin" onchange="onFc()"><option value="0">最低職等</option></select></div>
             <span class="grade-sep">至</span>
-            <div class="sel-wrap">
-              <select class="fs" id="gradeMax" onchange="onFilterChange()">
-                <option value="0">最高職等</option>
-              </select>
-            </div>
+            <div class="sel-wrap"><select class="fs" id="gradeMax" onchange="onFc()"><option value="0">最高職等</option></select></div>
           </div>
         </div>
 
         <!-- Actions -->
-        <div class="filter-group fg-actions">
+        <div class="filter-group fg-act">
           <div class="filter-actions">
             <button class="btn-clear" onclick="clearFilters()">✕ 清除篩選</button>
-            <div class="filter-result-hint" id="filterHint">載入中…</div>
+            <div class="filter-hint" id="filterHint">載入中…</div>
           </div>
         </div>
 
-      </div><!-- /filter-grid -->
-    </div><!-- /filter-body -->
+      </div>
+    </div>
   </div><!-- /filter-panel -->
 
-  <!-- ── Stats Bar ──────────────────────────────────────── -->
-  <div class="stats-bar" id="statsBar">
+  <!-- Stats Bar -->
+  <div class="stats-bar">
     <span id="statsText">載入中…</span>
     <span id="statsPage"></span>
   </div>
 
-  <!-- ── Loading ────────────────────────────────────────── -->
+  <!-- Loading -->
   <div class="state-wrap" id="loadingWrap">
     <div class="spinner"></div>
     <div>載入職缺資料中…</div>
   </div>
 
-  <!-- ── Table (Desktop) ───────────────────────────────── -->
+  <!-- Desktop Table -->
   <div class="table-wrap" id="tableWrap" style="display:none">
     <table>
       <thead>
         <tr>
-          <th onclick="sortBy('title')">職稱<span class="sort-ico" id="si-title">↕</span></th>
-          <th onclick="sortBy('work_place')">地點<span class="sort-ico" id="si-work_place">↕</span></th>
-          <th onclick="sortBy('rank_type')">官等<span class="sort-ico" id="si-rank_type">↕</span></th>
-          <th onclick="sortBy('rank_grade_min')">職等<span class="sort-ico" id="si-rank_grade_min">↕</span></th>
-          <th onclick="sortBy('sysnam_grp')">職系<span class="sort-ico" id="si-sysnam_grp">↕</span></th>
-          <th onclick="sortBy('job_series')">職系細項<span class="sort-ico" id="si-job_series">↕</span></th>
-          <th onclick="sortBy('deadline_start')">開始日<span class="sort-ico" id="si-deadline_start">↕</span></th>
-          <th onclick="sortBy('deadline_end')">截止日<span class="sort-ico sorted" id="si-deadline_end">↑</span></th>
+          <th onclick="sortBy('title')">職稱<span class="si" id="si-title">↕</span></th>
+          <th onclick="sortBy('org_name')">機關名稱<span class="si" id="si-org_name">↕</span></th>
+          <th onclick="sortBy('work_place')">地點<span class="si" id="si-work_place">↕</span></th>
+          <th onclick="sortBy('rank_type')">官等<span class="si" id="si-rank_type">↕</span></th>
+          <th onclick="sortBy('rank_grade_min')">職等<span class="si" id="si-rank_grade_min">↕</span></th>
+          <th onclick="sortBy('sysnam_grp')">職系<span class="si" id="si-sysnam_grp">↕</span></th>
+          <th onclick="sortBy('job_series')">職系細項<span class="si" id="si-job_series">↕</span></th>
+          <th onclick="sortBy('deadline_start')">開始日<span class="si" id="si-deadline_start">↕</span></th>
+          <th onclick="sortBy('deadline_end')">截止日<span class="si sorted" id="si-deadline_end">↑</span></th>
         </tr>
       </thead>
       <tbody id="tbody"></tbody>
     </table>
   </div>
 
-  <!-- ── Cards (Mobile) ───────────────────────────────────── -->
+  <!-- Mobile Cards -->
   <div class="cards" id="cards"></div>
 
-  <!-- ── Empty State ──────────────────────────────────────── -->
+  <!-- Empty -->
   <div class="state-wrap" id="emptyWrap" style="display:none">
     <div class="state-icon">🔍</div>
     <div class="state-title">沒有符合條件的職缺</div>
     <div class="state-sub">請嘗試放寬篩選條件</div>
   </div>
 
-  <!-- ── Pagination ────────────────────────────────────────── -->
+  <!-- Pagination -->
   <div class="pagination" id="pagination"></div>
 
 </div><!-- /page -->
 
 <script>
-/* ── State ─────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────
+   Utility: HTML escape (function declaration = hoisted)
+───────────────────────────────────────────────────── */
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ─────────────────────────────────────────────────────
+   MultiSelect Component
+   Portal-based: dropdown appended to <body> so it's
+   never clipped by any ancestor's overflow:hidden
+───────────────────────────────────────────────────── */
+class MultiSelect {
+  constructor(mountId, {placeholder = '全部', searchable = false, onChange = () => {}} = {}) {
+    this.mount   = document.getElementById(mountId);
+    this.ph      = placeholder;
+    this.search  = searchable;
+    this.onChange = onChange;
+    this.selected = new Set();
+    this.items    = [];
+    this._open    = false;
+    this._build();
+    this._bind();
+  }
+
+  /* Public API */
+  setItems(items) {
+    this.items = items;    // [{value, label}]
+    if (this._open) this._renderList('');
+  }
+  getSelected() { return this.selected; }
+  clear() {
+    this.selected.clear();
+    if (this._open) this._renderList(this._sv());
+    this._updateBtn();
+    this.onChange(this.selected);
+  }
+
+  _sv() { return this.si ? this.si.value.trim() : ''; }
+
+  _build() {
+    /* Trigger button inside mount */
+    this.mount.innerHTML = `<button type="button" class="ms-btn"><span class="ms-txt ph">${esc(this.ph)}</span><span class="ms-arr">▼</span></button>`;
+    this.btn = this.mount.querySelector('.ms-btn');
+    this.txt = this.mount.querySelector('.ms-txt');
+
+    /* Dropdown portal → body */
+    this.dd = document.createElement('div');
+    this.dd.className = 'ms-dropdown';
+    this.dd.style.cssText = 'display:none';
+    if (this.search) this.dd.insertAdjacentHTML('beforeend', `<div class="ms-srow"><input class="ms-si" type="text" placeholder="搜尋…"></div>`);
+    this.dd.insertAdjacentHTML('beforeend', `<div class="ms-arow"><span class="ms-cnt"></span><button type="button" class="ms-clr">清除</button></div><div class="ms-list"></div>`);
+    document.body.appendChild(this.dd);
+
+    this.list = this.dd.querySelector('.ms-list');
+    this.cnt  = this.dd.querySelector('.ms-cnt');
+    if (this.search) this.si = this.dd.querySelector('.ms-si');
+  }
+
+  _bind() {
+    this.btn.addEventListener('click', e => { e.stopPropagation(); this._toggle(); });
+    this.dd.querySelector('.ms-clr').addEventListener('click', e => { e.stopPropagation(); this.clear(); });
+    if (this.si) this.si.addEventListener('input', () => this._renderList(this.si.value.trim()));
+    document.addEventListener('click', () => this._closeAll());
+    this.dd.addEventListener('click', e => e.stopPropagation());
+    this.mount.addEventListener('click', e => e.stopPropagation());
+  }
+
+  _toggle() { this._open ? this._closeAll() : this._openMe(); }
+
+  _openMe() {
+    /* Close any other open multi-selects */
+    this._closeAll(true);
+    /* Position relative to trigger */
+    const r = this.btn.getBoundingClientRect();
+    const w = Math.max(r.width, 220);
+    let left = r.left + window.scrollX;
+    if (left + w > window.innerWidth - 8) left = window.innerWidth - w - 8;
+    this.dd.style.cssText = `display:flex;flex-direction:column;position:absolute;top:${r.bottom + window.scrollY + 4}px;left:${left}px;width:${w}px`;
+    this.btn.classList.add('open');
+    this._open = true;
+    if (this.si) { this.si.value = ''; this.si.focus(); }
+    this._renderList('');
+  }
+
+  _closeAll(skipSelf = false) {
+    /* Tell all portaled dropdowns to close */
+    document.querySelectorAll('.ms-dropdown').forEach(dd => { dd.style.display = 'none'; });
+    document.querySelectorAll('.ms-btn.open').forEach(b => b.classList.remove('open'));
+    if (!skipSelf) this._open = false;
+  }
+
+  _renderList(q) {
+    const items = q ? this.items.filter(it => it.label.toLowerCase().includes(q.toLowerCase())) : this.items;
+    this.cnt.textContent = this.selected.size ? `已選 ${this.selected.size} 項` : '';
+    this.list.innerHTML = items.length
+      ? items.map(it => {
+          const on = this.selected.has(it.value);
+          return `<div class="ms-item${on?' on':''}" data-v="${esc(it.value)}"><span class="ms-ck"></span><span>${esc(it.label)}</span></div>`;
+        }).join('')
+      : `<div class="ms-empty">無符合項目</div>`;
+    this.list.querySelectorAll('.ms-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const v = el.dataset.v;
+        this.selected.has(v) ? this.selected.delete(v) : this.selected.add(v);
+        el.classList.toggle('on', this.selected.has(v));
+        this.cnt.textContent = this.selected.size ? `已選 ${this.selected.size} 項` : '';
+        this._updateBtn();
+        this.onChange(this.selected);
+      });
+    });
+  }
+
+  _updateBtn() {
+    const n = this.selected.size;
+    if (n === 0) { this.txt.textContent = this.ph; this.txt.classList.add('ph'); }
+    else if (n === 1) { this.txt.textContent = [...this.selected][0]; this.txt.classList.remove('ph'); }
+    else { this.txt.textContent = `已選 ${n} 項`; this.txt.classList.remove('ph'); }
+  }
+}
+
+/* ─────────────────────────────────────────────────────
+   App State
+───────────────────────────────────────────────────── */
 const PAGE_SIZE = 50;
-let allJobs = [];
+let allJobs  = [];
 let filtered = [];
 let curPage  = 1;
 let sortField = 'deadline_end';
 let sortAsc   = true;
-let activeRanks = new Set();        // selected rank codes
-let sysnamMap   = {};               // grp → [series names]
+let activeRanks = new Set();
+let sysnamMap   = {};           // grp → sorted [name, ...]
 let filterBodyOpen = true;
 
-/* ── Init ──────────────────────────────────────────────── */
-(function initGrades() {
+/* Multi-select instances */
+let locMS, snameMS;
+
+/* ─────────────────────────────────────────────────────
+   Init
+───────────────────────────────────────────────────── */
+(function init() {
+  /* Grade selects */
   const mn = document.getElementById('gradeMin');
   const mx = document.getElementById('gradeMax');
   for (let i = 1; i <= 14; i++) {
     mn.add(new Option(`第 ${i} 職等`, i));
     mx.add(new Option(`第 ${i} 職等`, i));
   }
+
+  /* Multi-select instances */
+  locMS   = new MultiSelect('locMs',   { placeholder: '全部地點', searchable: true,  onChange: onFc });
+  snameMS = new MultiSelect('snameMs', { placeholder: '全部職系', searchable: true,  onChange: onFc });
 })();
 
-/* ── Load data ─────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────
+   Fetch data
+───────────────────────────────────────────────────── */
 fetch('/api/jobs')
   .then(r => r.json())
   .then(data => {
@@ -650,111 +666,94 @@ fetch('/api/jobs')
     buildDropdowns();
     applyFilters();
     document.getElementById('loadingWrap').style.display = 'none';
-    document.getElementById('tableWrap').style.display  = '';
+    document.getElementById('tableWrap').style.display   = '';
   })
   .catch(() => {
     document.getElementById('loadingWrap').innerHTML =
       '<div class="state-icon">❌</div><div class="state-title" style="color:#dc2626">載入失敗</div><div class="state-sub">請重新整理頁面</div>';
   });
 
-/* ── Build dropdown options ────────────────────────────── */
+/* ─────────────────────────────────────────────────────
+   Build dropdown / multi-select options from data
+───────────────────────────────────────────────────── */
 function buildDropdowns() {
-  // Location
-  const locSel = document.getElementById('location');
-  [...new Set(allJobs.map(j => j.work_place).filter(Boolean))].sort()
-    .forEach(p => locSel.add(new Option(p, p)));
+  /* Locations – unique sorted */
+  const locs = [...new Set(allJobs.map(j => j.work_place).filter(Boolean))].sort();
+  locMS.setItems(locs.map(v => ({ value: v, label: v })));
 
-  // sysnam map: grp → sorted unique series names
-  sysnamMap = { A: new Set(), B: new Set() };
+  /* sysnam map: grp → sorted unique job_series */
+  const tmp = { A: new Set(), B: new Set(), '': new Set() };
   allJobs.forEach(j => {
-    if (j.job_series && j.sysnam_grp)
-      (sysnamMap[j.sysnam_grp] = sysnamMap[j.sysnam_grp] || new Set()).add(j.job_series);
-    else if (j.job_series)
-      (sysnamMap[''] = sysnamMap[''] || new Set()).add(j.job_series);
+    if (!j.job_series) return;
+    const g = j.sysnam_grp || '';
+    (tmp[g] = tmp[g] || new Set()).add(j.job_series);
+    tmp[''].add(j.job_series);           // "all" group
   });
-  // Convert Sets to sorted arrays
-  Object.keys(sysnamMap).forEach(k => sysnamMap[k] = [...sysnamMap[k]].sort());
-  // All = union of all groups
-  sysnamMap[''] = [...new Set(Object.values(sysnamMap).flat())].sort();
+  Object.keys(tmp).forEach(k => sysnamMap[k] = [...tmp[k]].sort());
 
-  buildSysnamDropdown('');
+  buildSnameItems('');
 }
 
-function buildSysnamDropdown(grp) {
-  const sel = document.getElementById('sysnamName');
-  const prev = sel.value;
-  sel.innerHTML = '<option value="">全部職系</option>';
-  (sysnamMap[grp] || []).forEach(n => sel.add(new Option(n, n)));
-  if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+function buildSnameItems(grp) {
+  const names = sysnamMap[grp] || sysnamMap[''] || [];
+  snameMS.setItems(names.map(n => ({ value: n, label: n })));
 }
 
-/* ── Filter events ─────────────────────────────────────── */
-function onSysnamGrpChange() {
-  buildSysnamDropdown(document.getElementById('sysnamGrp').value);
-  onFilterChange();
+/* ─────────────────────────────────────────────────────
+   Filter events
+───────────────────────────────────────────────────── */
+function onGrpChange() {
+  const grp = document.getElementById('sysnamGrp').value;
+  buildSnameItems(grp);
+  snameMS.clear();
+  onFc();
 }
 
 function toggleRank(code, label) {
-  if (activeRanks.has(code)) { activeRanks.delete(code); label.classList.remove('on'); }
-  else                        { activeRanks.add(code);    label.classList.add('on');   }
-  onFilterChange();
+  activeRanks.has(code) ? activeRanks.delete(code) : activeRanks.add(code);
+  label.classList.toggle('on', activeRanks.has(code));
+  onFc();
 }
 
-function onFilterChange() {
-  curPage = 1;
-  applyFilters();
-  updateActiveBadge();
-}
+function onFc() { curPage = 1; applyFilters(); updateActiveBadge(); }
 
-/* ── Core filter + sort ────────────────────────────────── */
+/* ─────────────────────────────────────────────────────
+   Core: filter + sort
+───────────────────────────────────────────────────── */
 function applyFilters() {
   const kw       = document.getElementById('kw').value.trim().toLowerCase();
-  const loc      = document.getElementById('location').value;
+  const selLoc   = locMS.getSelected();
   const grp      = document.getElementById('sysnamGrp').value;
-  const sname    = document.getElementById('sysnamName').value;
+  const selSname = snameMS.getSelected();
   const gradeMin = +document.getElementById('gradeMin').value || 0;
   const gradeMax = +document.getElementById('gradeMax').value || 0;
 
   filtered = allJobs.filter(j => {
-    // Keyword: search title + org + job_series + rank_type
-    if (kw && !`${j.title} ${j.org_name} ${j.job_series} ${j.rank_type}`.toLowerCase().includes(kw))
-      return false;
-    // Location
-    if (loc && j.work_place !== loc) return false;
-    // Sysnam group
-    if (grp && j.sysnam_grp !== grp) return false;
-    // Sysnam name (細項)
-    if (sname && j.job_series !== sname) return false;
-    // Rank types (OR logic)
+    if (kw && !`${j.title} ${j.org_name} ${j.job_series} ${j.rank_type}`.toLowerCase().includes(kw)) return false;
+    if (selLoc.size   > 0 && !selLoc.has(j.work_place))  return false;
+    if (grp           && j.sysnam_grp !== grp)           return false;
+    if (selSname.size > 0 && !selSname.has(j.job_series)) return false;
     if (activeRanks.size > 0) {
       const codes = (j.rank_type_codes || '').split(',').map(c => c.trim()).filter(Boolean);
       if (!codes.some(c => activeRanks.has(c))) return false;
     }
-    // Grade range (overlap logic)
     if (gradeMin > 0 || gradeMax > 0) {
       const jn = j.rank_grade_min || 0, jx = j.rank_grade_max || 0;
-      // 0/0 means unknown → always include
       if (jn !== 0 || jx !== 0) {
-        const effMin = jn || jx || 1;
-        const effMax = jx || jn || 14;
-        const uMin   = gradeMin || 1;
-        const uMax   = gradeMax || 14;
+        const effMin = jn || jx || 1, effMax = jx || jn || 14;
+        const uMin = gradeMin || 1, uMax = gradeMax || 14;
         if (effMax < uMin || effMin > uMax) return false;
       }
     }
     return true;
   });
 
-  // Sort
+  /* Sort */
   filtered.sort((a, b) => {
     let va = a[sortField], vb = b[sortField];
-    if (sortField === 'deadline_end' || sortField === 'deadline_start') {
-      va = va || '9999-12-31'; vb = vb || '9999-12-31';
-    } else if (sortField === 'rank_grade_min') {
-      va = va || 999; vb = vb || 999;
-    } else {
-      va = String(va || ''); vb = String(vb || '');
-    }
+    if (['deadline_end','deadline_start'].includes(sortField)) { va = va || '9999-12-31'; vb = vb || '9999-12-31'; }
+    else if (sortField === 'rank_grade_min')                   { va = va || 999;          vb = vb || 999; }
+    else                                                       { va = String(va || '');   vb = String(vb || ''); }
     return va < vb ? (sortAsc ? -1 : 1) : va > vb ? (sortAsc ? 1 : -1) : 0;
   });
 
@@ -762,92 +761,91 @@ function applyFilters() {
   updateStats();
 }
 
-/* ── Render current page ───────────────────────────────── */
+/* ─────────────────────────────────────────────────────
+   Render page
+───────────────────────────────────────────────────── */
 function renderPage() {
-  const start    = (curPage - 1) * PAGE_SIZE;
-  const end      = Math.min(start + PAGE_SIZE, filtered.length);
-  const pageData = filtered.slice(start, end);
+  const start = (curPage - 1) * PAGE_SIZE;
+  const end   = Math.min(start + PAGE_SIZE, filtered.length);
+  const data  = filtered.slice(start, end);
 
-  renderTable(pageData);
-  renderCards(pageData);
+  renderTable(data);
+  renderCards(data);
   renderPagination();
 
-  const isEmpty = filtered.length === 0;
-  document.getElementById('emptyWrap').style.display = isEmpty ? '' : 'none';
-  document.getElementById('tableWrap').style.display = isEmpty ? 'none' : '';
+  const empty = filtered.length === 0;
+  document.getElementById('emptyWrap').style.display = empty ? ''      : 'none';
+  document.getElementById('tableWrap').style.display = empty ? 'none'  : '';
 }
 
-/* ── Desktop table ─────────────────────────────────────── */
+/* Desktop table */
 function renderTable(data) {
   document.getElementById('tbody').innerHTML = data.map(j => {
     const grade = fmtGrade(j.rank_grade_min, j.rank_grade_max);
     const badge = j.sysnam_grp === 'A' ? '<span class="badge badge-A">行政類</span>'
                 : j.sysnam_grp === 'B' ? '<span class="badge badge-B">技術類</span>'
-                : '<span class="badge badge-x">—</span>';
-    const soon  = isSoon(j.deadline_end);
+                :                         '<span class="badge badge-x">—</span>';
+    const soon = isSoon(j.deadline_end);
     const title = j.job_url
       ? `<a href="${esc(j.job_url)}" target="_blank" rel="noopener">${esc(j.title)}</a>`
       : esc(j.title);
     return `<tr>
       <td class="td-title">${title}</td>
+      <td class="td-org" title="${esc(j.org_name)}">${esc(j.org_name)}</td>
       <td style="white-space:nowrap">${esc(j.work_place)}</td>
       <td class="td-rank">${esc(j.rank_type)}</td>
       <td class="td-grade">${grade}</td>
       <td>${badge}</td>
       <td style="font-size:12px;color:var(--text-sub)">${esc(j.job_series) || '—'}</td>
       <td class="td-date">${esc(j.deadline_start) || '—'}</td>
-      <td class="td-date${soon ? ' soon' : ''}">${esc(j.deadline_end) || '—'}${soon ? ' ⚠' : ''}</td>
+      <td class="td-date${soon?' soon':''}">${esc(j.deadline_end) || '—'}${soon?' ⚠':''}</td>
     </tr>`;
   }).join('');
 }
 
-/* ── Mobile cards ──────────────────────────────────────── */
+/* Mobile cards */
 function renderCards(data) {
   document.getElementById('cards').innerHTML = data.map(j => {
     const soon  = isSoon(j.deadline_end);
     const grade = fmtGrade(j.rank_grade_min, j.rank_grade_max);
+    const grpChip = j.sysnam_grp === 'A' ? `<span class="chip chip-blue">行政類</span>`
+                  : j.sysnam_grp === 'B' ? `<span class="chip chip-green">技術類</span>` : '';
+    const gradeChip = (j.rank_grade_min || j.rank_grade_max) ? `<span class="chip chip-gold">${grade}</span>` : '';
     const titleEl = j.job_url
       ? `<a href="${esc(j.job_url)}" target="_blank" rel="noopener">${esc(j.title)}</a>`
       : `<span>${esc(j.title)}</span>`;
-    const grpChip = j.sysnam_grp === 'A'
-      ? `<span class="chip chip-blue">行政類</span>`
-      : j.sysnam_grp === 'B'
-      ? `<span class="chip chip-green">技術類</span>` : '';
-    const gradeChip = (j.rank_grade_min || j.rank_grade_max)
-      ? `<span class="chip chip-grade">${grade}</span>` : '';
-    return `<div class="job-card${soon ? ' soon-card' : ''}">
+    return `<div class="job-card${soon?' soon-card':''}">
       <div class="card-head">${titleEl}</div>
-      ${j.org_name ? `<div class="card-org">${esc(j.org_name)}</div>` : ''}
+      ${j.org_name ? `<div class="card-org">🏢 ${esc(j.org_name)}</div>` : ''}
       <div class="card-chips">
-        ${j.work_place  ? `<span class="chip">📍 ${esc(j.work_place)}</span>` : ''}
+        ${j.work_place ? `<span class="chip">📍 ${esc(j.work_place)}</span>` : ''}
         ${grpChip}
-        ${j.job_series  ? `<span class="chip">${esc(j.job_series)}</span>`    : ''}
+        ${j.job_series ? `<span class="chip">${esc(j.job_series)}</span>` : ''}
         ${gradeChip}
       </div>
-      ${j.rank_type ? `<div class="card-rank" style="margin-top:8px">🎖 ${esc(j.rank_type)}</div>` : ''}
+      ${j.rank_type ? `<div class="card-rank">🎖 ${esc(j.rank_type)}</div>` : ''}
       <div class="card-dates">
-        <span class="card-date-label">受理期間</span>
-        ${esc(j.deadline_start) || '—'}
-        <span class="card-date-arrow">→</span>
-        <span class="card-date-end${soon ? ' soon-text' : ''}">${esc(j.deadline_end) || '—'}</span>
+        <span class="card-dlabel">受理期間</span>
+        ${esc(j.deadline_start)||'—'}
+        <span style="opacity:.4">→</span>
+        <span class="card-dend${soon?' soon-t':''}">${esc(j.deadline_end)||'—'}</span>
         ${soon ? '<span class="soon-tag">即將截止</span>' : ''}
       </div>
     </div>`;
   }).join('');
 }
 
-/* ── Pagination ────────────────────────────────────────── */
+/* Pagination */
 function renderPagination() {
-  const total = Math.ceil(filtered.length / PAGE_SIZE);
-  const pag   = document.getElementById('pagination');
-  if (total <= 1) { pag.innerHTML = ''; return; }
-
+  const tot = Math.ceil(filtered.length / PAGE_SIZE);
+  const pag = document.getElementById('pagination');
+  if (tot <= 1) { pag.innerHTML = ''; return; }
   let h = `<button class="pag-btn" onclick="goPage(${curPage-1})" ${curPage===1?'disabled':''}>‹</button>`;
-  pageRange(curPage, total).forEach(p => {
-    if (p === '…') h += `<span class="pag-dots">…</span>`;
-    else h += `<button class="pag-btn${p===curPage?' active':''}" onclick="goPage(${p})">${p}</button>`;
+  pageRange(curPage, tot).forEach(p => {
+    h += p === '…' ? `<span class="pag-dots">…</span>`
+       : `<button class="pag-btn${p===curPage?' active':''}" onclick="goPage(${p})">${p}</button>`;
   });
-  h += `<button class="pag-btn" onclick="goPage(${curPage+1})" ${curPage===total?'disabled':''}>›</button>`;
+  h += `<button class="pag-btn" onclick="goPage(${curPage+1})" ${curPage===tot?'disabled':''}>›</button>`;
   pag.innerHTML = h;
 }
 
@@ -869,44 +867,43 @@ function goPage(n) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-/* ── Sort ──────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────
+   Sort
+───────────────────────────────────────────────────── */
+const SORT_FIELDS = ['title','org_name','work_place','rank_type','rank_grade_min','sysnam_grp','job_series','deadline_start','deadline_end'];
+
 function sortBy(field) {
   if (sortField === field) sortAsc = !sortAsc;
   else { sortField = field; sortAsc = field.includes('deadline') || field === 'rank_grade_min'; }
-
-  const sortableFields = ['title','work_place','rank_type','rank_grade_min','sysnam_grp','job_series','deadline_start','deadline_end'];
-  sortableFields.forEach(f => {
+  SORT_FIELDS.forEach(f => {
     const el = document.getElementById(`si-${f}`);
     const th = el?.closest('th');
     if (!el) return;
-    if (f === field) { el.textContent = sortAsc ? '↑' : '↓'; th?.classList.add('sorted'); }
-    else             { el.textContent = '↕';                  th?.classList.remove('sorted'); }
+    if (f === field) { el.textContent = sortAsc ? '↑' : '↓'; el.className = 'si sorted'; th?.classList.add('sorted'); }
+    else             { el.textContent = '↕';                  el.className = 'si';         th?.classList.remove('sorted'); }
   });
-
   curPage = 1;
   applyFilters();
 }
 
-/* ── Stats ─────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────
+   Stats & badge
+───────────────────────────────────────────────────── */
 function updateStats() {
   const start = (curPage - 1) * PAGE_SIZE + 1;
   const end   = Math.min(curPage * PAGE_SIZE, filtered.length);
-  document.getElementById('statsText').innerHTML =
-    `共 <strong>${allJobs.length}</strong> 筆・篩選後 <strong>${filtered.length}</strong> 筆`;
-  document.getElementById('statsPage').textContent =
-    filtered.length > 0 ? `第 ${start}–${end} 筆` : '';
-  document.getElementById('filterHint').innerHTML =
-    `篩選後 <strong>${filtered.length}</strong> 筆`;
+  document.getElementById('statsText').innerHTML  = `共 <strong>${allJobs.length}</strong> 筆・篩選後 <strong>${filtered.length}</strong> 筆`;
+  document.getElementById('statsPage').textContent = filtered.length > 0 ? `第 ${start}–${end} 筆` : '';
+  document.getElementById('filterHint').innerHTML  = `篩選後 <strong>${filtered.length}</strong> 筆`;
 }
 
-/* ── Active filter badge ───────────────────────────────── */
 function updateActiveBadge() {
   let n = 0;
   if (document.getElementById('kw').value.trim()) n++;
-  if (document.getElementById('location').value)  n++;
+  if (locMS.getSelected().size > 0)   n++;
   if (document.getElementById('sysnamGrp').value) n++;
-  if (document.getElementById('sysnamName').value) n++;
-  if (activeRanks.size > 0) n++;
+  if (snameMS.getSelected().size > 0) n++;
+  if (activeRanks.size > 0)           n++;
   if (+document.getElementById('gradeMin').value) n++;
   if (+document.getElementById('gradeMax').value) n++;
   const badge = document.getElementById('activeBadge');
@@ -914,38 +911,41 @@ function updateActiveBadge() {
   badge.classList.toggle('show', n > 0);
 }
 
-/* ── Clear filters ─────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────
+   Clear all filters
+───────────────────────────────────────────────────── */
 function clearFilters() {
-  document.getElementById('kw').value       = '';
-  document.getElementById('location').value = '';
+  document.getElementById('kw').value = '';
+  locMS.clear();
   document.getElementById('sysnamGrp').value = '';
-  buildSysnamDropdown('');
-  document.getElementById('sysnamName').value = '';
-  document.getElementById('gradeMin').value   = '0';
-  document.getElementById('gradeMax').value   = '0';
+  buildSnameItems('');
+  snameMS.clear();
+  document.getElementById('gradeMin').value = '0';
+  document.getElementById('gradeMax').value = '0';
   activeRanks.clear();
   document.querySelectorAll('.rank-pill').forEach(l => l.classList.remove('on'));
-  onFilterChange();
+  onFc();
 }
 
-/* ── Toggle filter body (mobile) ──────────────────────── */
+/* ─────────────────────────────────────────────────────
+   Toggle filter body (mobile only)
+───────────────────────────────────────────────────── */
 function toggleFilterBody() {
-  if (window.innerWidth >= 641) return;   // desktop: always open
+  if (window.innerWidth >= 641) return;
   filterBodyOpen = !filterBodyOpen;
-  const body    = document.getElementById('filterBody');
-  const chevron = document.getElementById('chevron');
-  const label   = document.getElementById('toggleLabel');
-  body.classList.toggle('open', filterBodyOpen);
-  chevron.classList.toggle('up', filterBodyOpen);
-  label.textContent = filterBodyOpen ? '收合' : '展開';
+  document.getElementById('filterBody').classList.toggle('open', filterBodyOpen);
+  document.getElementById('chevron').classList.toggle('up', filterBodyOpen);
+  document.getElementById('toggleLabel').textContent = filterBodyOpen ? '收合' : '展開';
 }
 
-/* ── Helpers ───────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────
+   Helpers
+───────────────────────────────────────────────────── */
 function fmtGrade(mn, mx) {
   if (!mn && !mx) return '不限';
   if (mn && mx && mn === mx) return `第${mn}職等`;
-  if (mn && mx) return `第${mn}–${mx}職等`;
-  if (mn) return `第${mn}職等起`;
+  if (mn && mx)  return `第${mn}–${mx}職等`;
+  if (mn)        return `第${mn}職等起`;
   return `至第${mx}職等`;
 }
 
@@ -953,12 +953,6 @@ function isSoon(d) {
   if (!d) return false;
   const diff = (new Date(d) - new Date()) / 86400000;
   return diff >= 0 && diff <= 7;
-}
-
-function esc(s) {
-  return String(s ?? '')
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 </script>
 </body>
