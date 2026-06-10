@@ -27,7 +27,7 @@ from linebot.v3.messaging import (
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
-from app.crawler.form_options import SYSNAM_GRP_OPTIONS, get_form_options
+from app.crawler.form_options import SYSNAM_GRP_OPTIONS, get_form_options, get_sysnam_names_for_grp
 from app.db.database import delete_subscription, get_subscription, save_subscription, upsert_line_user
 from app.models.subscription import Subscription
 from app.services.query_service import handle_user_query
@@ -39,6 +39,9 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 # LINE Quick Reply 上限 13 個按鈕，保留 2 個給翻頁
 _PAGE_SIZE = 11
+
+# 地點/職系細項多選時，每頁 9 個選項（保留 4 個給 ◀ ▶ 不限 確定）
+_LOC_PAGE_SIZE = 9
 
 _NAV_NEXT  = "下一頁▶"
 _NAV_PREV  = "◀上一頁"
@@ -181,18 +184,45 @@ def _parse_grade_range(text: str) -> tuple[int, int]:
 
 # ── 訂閱流程各步驟 ────────────────────────────────────────────────────────────
 
-def _ask_location(user_id: str, reply_token: str):
-    """步驟 1：詢問工作地點（文字輸入 + 「不限地區」快捷鍵）。"""
-    _conv[user_id].update({"step": "setup_location"})
+def _get_loc_list() -> list[dict]:
+    """從 form_options 取得縣市清單，過濾群組項目，格式 [{"value":code, "name":name}]。"""
+    opts = get_form_options().get("work_place", [])
+    result = []
+    for o in opts:
+        if o["value"].endswith("00"):
+            continue
+        name = re.sub(r"^\d+-", "", o["text"])
+        result.append({"value": o["value"], "name": name})
+    return result
+
+
+def _ask_location(user_id: str, reply_token: str, page: int = 0):
+    """步驟 1：分頁 Quick Reply 多選縣市。"""
+    locs      = _get_loc_list()
+    pending   = _conv[user_id].setdefault("pending", {})
+    sel_codes = set(c for c in pending.get("work_place_codes", "").split(",") if c)
+    _conv[user_id].update({"step": "setup_location", "loc_page": page})
+
+    start, end = page * _LOC_PAGE_SIZE, min((page + 1) * _LOC_PAGE_SIZE, len(locs))
+    items = []
+    if page > 0:
+        items.append(QuickReplyItem(action=MessageAction(label=_NAV_PREV, text=_NAV_PREV)))
+    for loc in locs[start:end]:
+        label = f"✅ {loc['name']}" if loc["value"] in sel_codes else loc["name"]
+        items.append(QuickReplyItem(action=MessageAction(
+            label=label[:20], text=f"地點:{loc['value']}:{loc['name']}")))
+    if end < len(locs):
+        items.append(QuickReplyItem(action=MessageAction(label=_NAV_NEXT, text=_NAV_NEXT)))
+    items.append(QuickReplyItem(action=MessageAction(label="不限地區", text="地點:不限")))
+    n = len(sel_codes)
+    items.append(QuickReplyItem(action=MessageAction(
+        label=(f"✅ 確定 ({n})" if n else "✅ 確定")[:20], text="地點:確定")))
+
+    sel_names = [loc["name"] for loc in locs if loc["value"] in sel_codes]
+    status = f"已選：{'、'.join(sel_names)}" if sel_names else "（未選擇，等於不限）"
     _reply(reply_token, TextMessage(
-        text=(
-            "📍 請輸入工作地點（逗號分隔），\n"
-            "例如：臺北市,新北市,臺中市\n\n"
-            "或點「不限地區」："
-        ),
-        quick_reply=QuickReply(items=[
-            QuickReplyItem(action=MessageAction(label="不限地區", text="不限地區")),
-        ]),
+        text=f"📍 請選擇工作地點（可複選）：\n{status}",
+        quick_reply=QuickReply(items=items),
     ))
 
 
@@ -229,18 +259,32 @@ def _ask_sysnam_grp(user_id: str, reply_token: str):
     ))
 
 
-def _ask_sysnam_names(user_id: str, reply_token: str):
-    """步驟 4：詢問職系細項（文字輸入，可略過）。"""
-    _conv[user_id].update({"step": "setup_sysnam_names"})
+def _ask_sysnam_names(user_id: str, reply_token: str, page: int = 0):
+    """步驟 4：分頁 Quick Reply 多選職系細項。"""
+    grp      = _conv[user_id].get("pending", {}).get("sysnam_grp", "")
+    names    = get_sysnam_names_for_grp(grp)      # list[str]
+    pending  = _conv[user_id].setdefault("pending", {})
+    selected = set(n for n in pending.get("sysnam_names", "").split(",") if n)
+    _conv[user_id].update({"step": "setup_sysnam_names", "sname_page": page})
+
+    start, end = page * _LOC_PAGE_SIZE, min((page + 1) * _LOC_PAGE_SIZE, len(names))
+    items = []
+    if page > 0:
+        items.append(QuickReplyItem(action=MessageAction(label=_NAV_PREV, text=_NAV_PREV)))
+    for name in names[start:end]:
+        label = f"✅ {name}" if name in selected else name
+        items.append(QuickReplyItem(action=MessageAction(label=label[:20], text=f"細項:{name}")))
+    if end < len(names):
+        items.append(QuickReplyItem(action=MessageAction(label=_NAV_NEXT, text=_NAV_NEXT)))
+    items.append(QuickReplyItem(action=MessageAction(label="不限細項", text="細項:不限")))
+    n = len(selected)
+    items.append(QuickReplyItem(action=MessageAction(
+        label=(f"✅ 確定 ({n})" if n else "✅ 確定")[:20], text="細項:確定")))
+
+    status = f"已選：{'、'.join(selected)}" if selected else "（未選擇，等於不限）"
     _reply(reply_token, TextMessage(
-        text=(
-            "🗂 請輸入職系名稱（逗號分隔），\n"
-            "例如：綜合行政,社會行政\n\n"
-            "或點「略過」不限職系細項："
-        ),
-        quick_reply=QuickReply(items=[
-            QuickReplyItem(action=MessageAction(label=_SKIP, text=_SKIP)),
-        ]),
+        text=f"📋 請選擇職系細項（可複選）：\n{status}",
+        quick_reply=QuickReply(items=items),
     ))
 
 
@@ -324,25 +368,41 @@ def _save_and_confirm(user_id: str, reply_token: str):
 
 def _handle_location_step(user_id: str, text: str, reply_token: str):
     pending = _conv[user_id].setdefault("pending", {})
-    if text == "不限地區":
+    page    = _conv[user_id].get("loc_page", 0)
+
+    if text == _NAV_NEXT:
+        _ask_location(user_id, reply_token, page + 1); return
+    if text == _NAV_PREV:
+        _ask_location(user_id, reply_token, max(0, page - 1)); return
+    if text == "地點:不限":
         pending.update({"work_place_codes": "", "work_place_names": "不限"})
-    else:
-        codes, names = _parse_location_text(text)
-        if not codes:
-            # 無法解析 → 提示重新輸入
-            _reply(reply_token, TextMessage(
-                text=(
-                    f"❌ 無法識別「{text}」\n\n"
-                    "請輸入縣市名稱（如：臺北市,臺中市），\n"
-                    "或點「不限地區」："
-                ),
-                quick_reply=QuickReply(items=[
-                    QuickReplyItem(action=MessageAction(label="不限地區", text="不限地區")),
-                ]),
-            ))
-            return
+        _ask_rank_types(user_id, reply_token); return
+    if text == "地點:確定":
+        if not pending.get("work_place_codes"):
+            pending["work_place_names"] = "不限"
+        _ask_rank_types(user_id, reply_token); return
+    if text.startswith("地點:"):
+        parts = text.split(":", 2)
+        if len(parts) == 3:
+            _, code, name = parts
+            codes = set(c for c in pending.get("work_place_codes", "").split(",") if c)
+            names = [n for n in pending.get("work_place_names", "").split(",") if n and n != "不限"]
+            if code in codes:
+                codes.discard(code)
+                names = [n for n in names if n != name]
+            else:
+                codes.add(code)
+                names.append(name)
+            pending["work_place_codes"] = ",".join(codes)
+            pending["work_place_names"] = ",".join(names)
+        _ask_location(user_id, reply_token, page); return
+    # fallback：舊版文字輸入（向下相容）
+    codes, names = _parse_location_text(text)
+    if codes:
         pending.update({"work_place_codes": codes, "work_place_names": names})
-    _ask_rank_types(user_id, reply_token)
+        _ask_rank_types(user_id, reply_token)
+    else:
+        _ask_location(user_id, reply_token, page)
 
 
 def _handle_rank_types_step(user_id: str, text: str, reply_token: str):
@@ -390,12 +450,30 @@ def _handle_sysnam_grp_step(user_id: str, text: str, reply_token: str):
 
 
 def _handle_sysnam_names_step(user_id: str, text: str, reply_token: str):
-    if text == _SKIP:
-        _conv[user_id].setdefault("pending", {})["sysnam_names"] = ""
-    else:
-        # 直接存使用者輸入（逗號分隔職系名稱）
-        names = ",".join([n.strip() for n in re.split(r"[\s、，,]+", text.strip()) if n.strip()])
-        _conv[user_id].setdefault("pending", {})["sysnam_names"] = names
+    pending = _conv[user_id].setdefault("pending", {})
+    page    = _conv[user_id].get("sname_page", 0)
+
+    if text == _NAV_NEXT:
+        _ask_sysnam_names(user_id, reply_token, page + 1); return
+    if text == _NAV_PREV:
+        _ask_sysnam_names(user_id, reply_token, max(0, page - 1)); return
+    if text == "細項:不限":
+        pending["sysnam_names"] = ""
+        _ask_rank_grade(user_id, reply_token); return
+    if text == "細項:確定":
+        _ask_rank_grade(user_id, reply_token); return
+    if text.startswith("細項:"):
+        name = text[3:]
+        selected = set(n for n in pending.get("sysnam_names", "").split(",") if n)
+        if name in selected:
+            selected.discard(name)
+        else:
+            selected.add(name)
+        pending["sysnam_names"] = ",".join(selected)
+        _ask_sysnam_names(user_id, reply_token, page); return
+    # fallback：舊版文字輸入（向下相容）
+    names = ",".join(n.strip() for n in re.split(r"[\s、，,]+", text.strip()) if n.strip())
+    pending["sysnam_names"] = names
     _ask_rank_grade(user_id, reply_token)
 
 

@@ -664,6 +664,7 @@ let filtered = [];
 let curPage  = 1;
 let sortField = 'deadline_end';
 let sortAsc   = true;
+let sortClickCount = 0;   // 追蹤當前排序欄位已被點幾次（第3次取消排序）
 let activeRanks = new Set();
 let sysnamMap   = {};           // grp → sorted [name, ...]
 let filterBodyOpen = true;
@@ -922,18 +923,32 @@ function goPage(n) {
 const SORT_FIELDS = ['title','org_name','work_place','rank_type','rank_grade_min','sysnam_grp','job_series','deadline_start','deadline_end'];
 
 function sortBy(field) {
-  if (sortField === field) sortAsc = !sortAsc;
-  else { sortField = field; sortAsc = field.includes('deadline') || field === 'rank_grade_min'; }
+  if (sortField === field) {
+    sortClickCount++;
+    if (sortClickCount >= 2) {
+      // 第三次點擊 → 取消排序，回到預設（截止日升序）
+      sortField = 'deadline_end';
+      sortAsc = true;
+      sortClickCount = 0;
+    } else {
+      sortAsc = !sortAsc;
+    }
+  } else {
+    sortField = field;
+    sortAsc = field.includes('deadline') || field === 'rank_grade_min';
+    sortClickCount = 0;
+  }
+  /* 更新桌面 th 指示器（用 sortField 而非 field，reset 後才正確）*/
   SORT_FIELDS.forEach(f => {
     const el = document.getElementById(`si-${f}`);
     const th = el?.closest('th');
     if (!el) return;
-    if (f === field) { el.textContent = sortAsc ? '↑' : '↓'; el.className = 'si sorted'; th?.classList.add('sorted'); }
-    else             { el.textContent = '↕';                  el.className = 'si';         th?.classList.remove('sorted'); }
+    if (f === sortField) { el.textContent = sortAsc ? '↑' : '↓'; el.className = 'si sorted'; th?.classList.add('sorted'); }
+    else                 { el.textContent = '↕';                  el.className = 'si';         th?.classList.remove('sorted'); }
   });
-  /* Sync mobile sort bar */
+  /* 同步手機排序按鈕 */
   document.querySelectorAll('.sort-btn').forEach(btn => {
-    const isActive = btn.dataset.field === field;
+    const isActive = btn.dataset.field === sortField;
     btn.classList.toggle('sort-active', isActive);
     btn.textContent = isActive
       ? `${btn.dataset.label} ${sortAsc ? '↑' : '↓'}`
