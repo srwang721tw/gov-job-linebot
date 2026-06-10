@@ -56,6 +56,12 @@ header {
 .hdr-icon { font-size: 22px; flex-shrink: 0; }
 header h1 { font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
 header p  { font-size: 11px; opacity: .7; margin-top: 1px; }
+.hdr-credit {
+  margin-left: auto; flex-shrink: 0;
+  font-size: 12px; color: rgba(255,255,255,.7);
+  text-decoration: none; white-space: nowrap;
+}
+.hdr-credit:hover { color: #fff; text-decoration: underline; }
 
 /* ── Page ───────────────────────────────────────────── */
 .page { max-width: 1200px; margin: 0 auto; padding: 14px 14px 100px; }
@@ -235,6 +241,14 @@ header p  { font-size: 11px; opacity: .7; margin-top: 1px; }
 }
 .ms-empty { padding: 14px; text-align: center; color: var(--text-muted); font-size: 13px; }
 
+/* ── Sort Bar (Mobile only) ─────────────────────────── */
+.sort-bar { display:none; background:var(--card); border-radius:var(--radius-sm); box-shadow:var(--shadow); margin-bottom:12px; padding:10px 14px; }
+.sort-bar-lbl { display:block; font-size:11px; font-weight:700; color:var(--text-sub); text-transform:uppercase; letter-spacing:.06em; margin-bottom:6px; }
+.sort-btns { display:flex; flex-wrap:wrap; gap:6px; }
+.sort-btn { padding:5px 11px; border:1.5px solid var(--border); border-radius:15px; background:#fff; color:var(--text); font-size:12px; font-family:inherit; cursor:pointer; transition:all .15s; }
+.sort-btn:hover { border-color:var(--primary); }
+.sort-btn.sort-active { background:var(--primary); color:#fff; border-color:var(--primary); font-weight:600; }
+
 /* ── Stats Bar ──────────────────────────────────────── */
 .stats-bar {
   display: flex; align-items: center; justify-content: space-between;
@@ -350,6 +364,7 @@ tbody tr:hover td { background: #fafbff; }
   .cards { display: flex; }
   header h1 { font-size: 16px; }
   .page { padding: 10px 12px 80px; }
+  .sort-bar { display: block; }
 }
 @media (min-width: 641px) {
   .filter-body { display: block !important; }
@@ -368,6 +383,7 @@ tbody tr:hover td { background: #fafbff; }
       <h1>政府職缺查詢</h1>
       <p>資料來源：行政院人事行政總處事求人系統，每日更新</p>
     </div>
+    <a class="hdr-credit" href="https://github.com/srwang721tw" target="_blank" rel="noopener">© 2026 srwang721tw</a>
   </div>
 </header>
 
@@ -454,6 +470,21 @@ tbody tr:hover td { background: #fafbff; }
       </div>
     </div>
   </div><!-- /filter-panel -->
+
+  <!-- Mobile Sort Bar -->
+  <div class="sort-bar" id="sortBar">
+    <span class="sort-bar-lbl">排序</span>
+    <div class="sort-btns">
+      <button class="sort-btn" data-field="title" data-label="職稱" onclick="sortBy('title')">職稱</button>
+      <button class="sort-btn" data-field="org_name" data-label="機關" onclick="sortBy('org_name')">機關</button>
+      <button class="sort-btn" data-field="work_place" data-label="地點" onclick="sortBy('work_place')">地點</button>
+      <button class="sort-btn" data-field="rank_type" data-label="官等" onclick="sortBy('rank_type')">官等</button>
+      <button class="sort-btn" data-field="rank_grade_min" data-label="職等" onclick="sortBy('rank_grade_min')">職等</button>
+      <button class="sort-btn" data-field="job_series" data-label="職系細項" onclick="sortBy('job_series')">職系細項</button>
+      <button class="sort-btn" data-field="deadline_start" data-label="開始日" onclick="sortBy('deadline_start')">開始日</button>
+      <button class="sort-btn sort-active" data-field="deadline_end" data-label="截止日" onclick="sortBy('deadline_end')">截止日 ↑</button>
+    </div>
+  </div>
 
   <!-- Stats Bar -->
   <div class="stats-bar">
@@ -682,7 +713,21 @@ function buildDropdowns() {
      work_place may be comma-separated and/or have numeric code prefix (e.g. "61-嘉義縣") */
   const locSet = new Set();
   allJobs.forEach(j => parseLocations(j.work_place).forEach(l => locSet.add(l)));
-  const locs = [...locSet].sort();
+  /* Sort by tier: 直轄市 → 省轄市 → 一般縣市 → 離島, 各組內 北→中→南→東 */
+  const LOC_ORDER = [
+    '臺北市','新北市','桃園市','臺中市','臺南市','高雄市',   // 直轄市
+    '基隆市','新竹市','嘉義市',                              // 省轄市
+    '宜蘭縣','新竹縣','苗栗縣','彰化縣','南投縣','雲林縣',   // 一般縣市 北→中
+    '嘉義縣','屏東縣','花蓮縣','臺東縣',                     // 南→東
+    '澎湖縣','金門縣','連江縣',                              // 離島
+  ];
+  const locs = [...locSet].sort((a, b) => {
+    const ia = LOC_ORDER.indexOf(a), ib = LOC_ORDER.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b, 'zh-TW');
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
   locMS.setItems(locs.map(v => ({ value: v, label: v })));
 
   /* sysnam map: grp → sorted unique job_series */
@@ -797,7 +842,7 @@ function renderTable(data) {
       <td class="td-title">${title}</td>
       <td class="td-org" title="${esc(j.org_name)}">${esc(j.org_name)}</td>
       <td style="white-space:nowrap">${esc(j.work_place)}</td>
-      <td class="td-rank">${esc(j.rank_type)}</td>
+      <td class="td-rank">${esc(fmtRank(j.rank_type_codes))}</td>
       <td class="td-grade">${grade}</td>
       <td>${badge}</td>
       <td style="font-size:12px;color:var(--text-sub)">${esc(j.job_series) || '—'}</td>
@@ -827,7 +872,7 @@ function renderCards(data) {
         ${j.job_series ? `<span class="chip">${esc(j.job_series)}</span>` : ''}
         ${gradeChip}
       </div>
-      ${j.rank_type ? `<div class="card-rank">🎖 ${esc(j.rank_type)}</div>` : ''}
+      ${j.rank_type_codes ? `<div class="card-rank">🎖 ${esc(fmtRank(j.rank_type_codes))}</div>` : ''}
       <div class="card-dates">
         <span class="card-dlabel">受理期間</span>
         ${esc(j.deadline_start)||'—'}
@@ -885,6 +930,14 @@ function sortBy(field) {
     if (!el) return;
     if (f === field) { el.textContent = sortAsc ? '↑' : '↓'; el.className = 'si sorted'; th?.classList.add('sorted'); }
     else             { el.textContent = '↕';                  el.className = 'si';         th?.classList.remove('sorted'); }
+  });
+  /* Sync mobile sort bar */
+  document.querySelectorAll('.sort-btn').forEach(btn => {
+    const isActive = btn.dataset.field === field;
+    btn.classList.toggle('sort-active', isActive);
+    btn.textContent = isActive
+      ? `${btn.dataset.label} ${sortAsc ? '↑' : '↓'}`
+      : btn.dataset.label;
   });
   curPage = 1;
   applyFilters();
@@ -952,6 +1005,13 @@ function parseLocations(raw) {
   return raw.split(/[,，]/)
     .map(s => s.trim().replace(/^\d{2,3}-/, ''))   // strip leading code prefix like "61-"
     .filter(Boolean);
+}
+
+/* Derive simplified 官等 label from rank_type_codes (1=簡任/2=薦任/3=委任/4=其他) */
+function fmtRank(codes) {
+  const MAP = { '1':'簡任', '2':'薦任', '3':'委任', '4':'其他' };
+  const parts = (codes||'').split(',').map(s=>s.trim()).filter(s=>MAP[s]);
+  return parts.length ? [...new Set(parts)].map(c=>MAP[c]).join('、') : '—';
 }
 
 function fmtGrade(mn, mx) {
