@@ -10,10 +10,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 格式：`git commit -m "類型(範圍): 說明"`
 - push 指令：`git push origin main`
 
-## 專案說明（v3.1）
+## 專案說明（v3.2）
 
 LINE + Telegram 聊天機器人，讓使用者設定工作地點（多選）、官等類別（多選）、職系、職務列等區間、關鍵字等訂閱條件。
-後端每日定時爬取台灣行政院人事行政總處事求人（`web3.dgpa.gov.tw`）的政府職缺（含詳細頁），
+爬蟲**本機手動執行**，爬取台灣行政院人事行政總處事求人（`web3.dgpa.gov.tw`）的政府職缺（含詳細頁），
 儲存至 Neon PostgreSQL 的 `jobs` 資料表。查詢時直接從 DB 搜尋，速度快且資料完整。
 **無 LLM、無向量搜尋**，搜尋用 pg_trgm 模糊比對 + 多關鍵字 similarity 排序。
 
@@ -30,12 +30,11 @@ uvicorn app.main:app --reload
 python scripts/test_crawl.py
 MAX_CRAWL_PAGES=1 python scripts/test_crawl.py
 
+# 設定 LINE Rich Menu（一次性，本機執行）
+python scripts/setup_line_menu.py
+
 # 健康檢查（回傳訂閱人數 + 職缺筆數）
 curl http://localhost:8000/health
-
-# 手動觸發排程爬取（需設定 CRAWL_SECRET）
-curl -X POST http://localhost:8000/admin/trigger-crawl \
-  -H "X-Crawl-Secret: your_secret"
 ```
 
 ## 環境設定
@@ -44,33 +43,34 @@ curl -X POST http://localhost:8000/admin/trigger-crawl \
 - `LINE_CHANNEL_ACCESS_TOKEN` 和 `LINE_CHANNEL_SECRET` — LINE webhook 必填
 - `DATABASE_URL` — Neon PostgreSQL 連線字串（`postgresql://...?sslmode=require`）；**未設定則自動 fallback 到本機 SQLite**
 - `TELEGRAM_BOT_TOKEN` — Telegram @BotFather 取得（可選）
-- `CRAWL_SECRET` — 保護 `/admin/trigger-crawl` 端點的 secret key（建議設定）
-- `MAX_CRAWL_PAGES` — 即時查詢最多爬幾頁（本機建議 `1`，正式 `3`）
-- `MAX_CRAWL_PAGES_SCHEDULED` — 排程爬取頁數（`0` = 不限，抓全部）
+- `TELEGRAM_WEBHOOK_SECRET` — Telegram webhook 簽章驗證用，設定後需重新部署（建議設定）
+- `MAX_CRAWL_PAGES` — 爬蟲每次最多爬幾頁（本機建議 `1`，正式 `0` = 全部）
+- `MAX_CRAWL_PAGES_SCHEDULED` — 同上（供 config 讀取，預設 `0` = 全部）
 - `CRAWL_DETAIL_DELAY` — 詳細頁爬取間隔秒數（預設 `0.3`）
-- `TOP_K_RESULTS` — 回傳給使用者的最大職缺數（預設 `5`）
+- `TOP_K_RESULTS` — 回傳給使用者的最大職缺數（預設 `10`）
 
 資料目錄 `data/sqlite/` 啟動時自動建立（SQLite 模式）。
 
-## 架構（v3.1）
+## 架構（v3.2）
 
 ```
 前端 (LINE / Telegram)
     ↓ webhook
-FastAPI (/webhook, /telegram-webhook)
-    ├── 訂閱設定流程（Quick Reply / InlineKeyboard，7步驟）→ subscription 表
-    └── 查詢請求 → query_service
-                        ↓ SQL 搜尋 + pg_trgm similarity
-                   jobs 表（Neon PostgreSQL）
-                        ↓ 格式化 → 回覆
+FastAPI (Render)
+    ├── /webhook            LINE 訊息 → line_service
+    ├── /telegram-webhook   Telegram 訊息 → telegram_service（含簽章驗證）
+    ├── /detail             職缺查詢網頁（RWD，篩選/排序/分頁）
+    └── /api/jobs           JSON 職缺資料（供 /detail 頁載入）
+         ↓
+    query_service
+         ↓ SQL 搜尋 + pg_trgm similarity
+    jobs 表（Neon PostgreSQL）
+         ↓ 格式化 → 回覆
 
-背景排程（APScheduler, 每日 02:00 台灣時間）
-    → scraper（is_office=True，列表頁 + 詳細頁）
+爬蟲（本機手動執行）
+    python scripts/test_crawl.py
+    → scraper（is_office=True，列表頁 + 詳細頁並行爬取）
     → jobs 表 UPSERT → delete_expired_jobs()
-    
-外部 Cron（cron-job.org）
-    → POST /admin/trigger-crawl
-    → 確保 Render free tier 也能觸發排程
 ```
 
 **查詢流程：**
@@ -121,8 +121,8 @@ FastAPI (/webhook, /telegram-webhook)
 - LINE：parse_mode=''（純文字 URL）
 - Telegram：parse_mode='HTML'（`<a href="url">職缺網址</a>`）
 
-**排程器（`app/scheduler/crawl_scheduler.py`）：** APScheduler AsyncIOScheduler，每日 02:00 台灣時間。
-固定 `is_office=True`，整批 upsert 完成後呼叫一次 `delete_expired_jobs()`。
+**Rich Menu（`scripts/setup_line_menu.py`）：** 一次性腳本，本機執行。
+Pillow 生成 2500×843 PNG（深藍底 + 5 個藍色按鈕），透過 api-data.line.me 上傳，設為所有使用者預設選單。
 
 ## 已確定的技術決策（勿重新提議）
 
@@ -131,10 +131,10 @@ FastAPI (/webhook, /telegram-webhook)
 | 無 LLM | 使用者明確選擇不接付費 API |
 | 無向量搜尋（pgvector）| pg_trgm 對現有結構化訂閱條件已足夠 |
 | SQLite 不用 ORM | 結構簡單，直接 sqlite3 足夠 |
-| 每日排程爬取（非即時） | 儲存完整詳細頁資料，查詢速度快 |
-| 外部 cron 觸發（cron-job.org）| 解決 Render free tier spin down 問題 |
+| 爬蟲本機手動執行（非 Render） | Render free tier 資源受限，本機爬取更穩定 |
 | IS_OFFICE 寫死 True | 只爬公務人員任用資格職缺 |
 | 關鍵字不傳給爬蟲 | 只用於 DB 模糊比對，避免限制全量爬取 |
+| LINE Rich Menu（Pillow 生成） | 無需外部圖片服務，本機一次性執行即可 |
 
 ## 爬蟲 DGPA 表單欄位（已驗證 2026-06）
 
@@ -161,27 +161,7 @@ DATE_FROM / DATE_TO     民國年格式 YYYMMDD
 - Healthcheck：`/health`
 
 **必要環境變數（Render Dashboard 手動設定）：**
-`LINE_CHANNEL_ACCESS_TOKEN`、`LINE_CHANNEL_SECRET`、`DATABASE_URL`（Neon）、`CRAWL_SECRET`
+`LINE_CHANNEL_ACCESS_TOKEN`、`LINE_CHANNEL_SECRET`、`DATABASE_URL`（Neon）
 
-**cron-job.org 設定：**
-每日 18:00 UTC（= 台灣 02:00）打 POST 到 `https://<render-url>/admin/trigger-crawl`，
-Header：`X-Crawl-Secret: <CRAWL_SECRET 值>`
-
-**Neon 舊欄位清理（v3.1 升級後手動執行）：**
-```sql
--- subscription 表
-ALTER TABLE subscription DROP COLUMN IF EXISTS work_place_code;
-ALTER TABLE subscription DROP COLUMN IF EXISTS work_place_name;
-ALTER TABLE subscription DROP COLUMN IF EXISTS person_kind_code;
-ALTER TABLE subscription DROP COLUMN IF EXISTS person_kind_name;
-ALTER TABLE subscription DROP COLUMN IF EXISTS title_keyword;
-ALTER TABLE subscription DROP COLUMN IF EXISTS org_keyword;
-
--- jobs 表
-ALTER TABLE jobs DROP COLUMN IF EXISTS deadline;
-ALTER TABLE jobs DROP COLUMN IF EXISTS deadline_end_iso;
-ALTER TABLE jobs DROP COLUMN IF EXISTS person_kind;
-ALTER TABLE jobs DROP COLUMN IF EXISTS person_kind_code;
-ALTER TABLE jobs DROP COLUMN IF EXISTS apply_method;
-ALTER TABLE jobs DROP COLUMN IF EXISTS contact_method;
-```
+**建議設定：**
+`TELEGRAM_BOT_TOKEN`、`TELEGRAM_WEBHOOK_SECRET`（隨機字串，部署後自動 set_webhook）

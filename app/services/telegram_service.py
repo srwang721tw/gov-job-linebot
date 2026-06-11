@@ -28,7 +28,6 @@ callback_data 前綴：
 """
 import asyncio
 import re
-import urllib.parse
 from typing import Optional
 
 from telegram import (
@@ -48,7 +47,8 @@ from app.crawler.form_options import SYSNAM_GRP_OPTIONS, get_form_options, get_s
 from app.db.database import delete_subscription, get_subscription, save_subscription, upsert_telegram_user
 from app.models.subscription import Subscription
 from app.services.query_service import handle_user_query
-from app.utils.config import TELEGRAM_BOT_TOKEN
+from app.utils.config import TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET
+from app.utils.formatting import RANK_TYPE_NAMES, comma_to_jap, grade_label, rank_names
 from app.utils.logger import logger
 
 # ── 全域 Application 實例 ─────────────────────────────────────────────────────
@@ -60,13 +60,6 @@ _conv: dict[int, dict] = {}
 _PAGE_SIZE     = 8   # Inline keyboard 每頁顯示幾個選項
 _ITEMS_PER_ROW = 2
 
-# 官等代碼 → 名稱
-_RANK_TYPE_NAMES = {
-    "1": "簡任",
-    "2": "薦任",
-    "3": "委任",
-    "4": "其他",
-}
 
 
 # ── 工具函式 ──────────────────────────────────────────────────────────────────
@@ -166,7 +159,7 @@ async def _ask_rank_types(user_id: int, chat_id: int, bot) -> None:
     selected_codes = set(
         c for c in _conv[user_id].get("pending", {}).get("rank_types", "").split(",") if c
     )
-    opts = [{"value": code, "text": name} for code, name in _RANK_TYPE_NAMES.items()]
+    opts = [{"value": code, "text": name} for code, name in RANK_TYPE_NAMES.items()]
     _conv[user_id].update({"step": "setup_rank_types", "page": 0})
 
     rows = []
@@ -269,7 +262,7 @@ async def _save_and_confirm(user_id: int, keywords: str, chat_id: int, bot) -> N
     """步驟 7：儲存並顯示摘要。"""
     pending = _conv.get(user_id, {}).get("pending", {})
     rank_types = pending.get("rank_types", "")
-    type_names = [_RANK_TYPE_NAMES[c] for c in ["1","2","3","4"] if c in rank_types.split(",")]
+    type_names = rank_names(rank_types)
 
     sub = Subscription(
         platform          = "telegram",
@@ -288,20 +281,14 @@ async def _save_and_confirm(user_id: int, keywords: str, chat_id: int, bot) -> N
     await loop.run_in_executor(None, save_subscription, sub)
     _conv.pop(user_id, None)
 
-    grade_min, grade_max = sub.rank_grade_min, sub.rank_grade_max
-    if grade_min == 0 and grade_max == 0:
-        grade_str = "不限"
-    elif grade_min == grade_max:
-        grade_str = f"{grade_min}職等"
-    else:
-        grade_str = f"{grade_min}-{grade_max}職等"
+    grade_str = grade_label(sub.rank_grade_min, sub.rank_grade_max, "不限")
 
     await bot.send_message(chat_id=chat_id, text="\n".join([
         "✅ 訂閱設定完成！",
         "",
-        f"📍 地點：{sub.work_place_names.replace(',', '、')}",
+        f"📍 地點：{comma_to_jap(sub.work_place_names)}",
         f"👔 官等：{'、'.join(type_names) or '不限'}",
-        f"🗂 職系：{sub.sysnam_grp_name}" + (f"（{sub.sysnam_names.replace(',','、')}）" if sub.sysnam_names else ""),
+        f"🗂 職系：{sub.sysnam_grp_name}" + (f"（{comma_to_jap(sub.sysnam_names)}）" if sub.sysnam_names else ""),
         f"📊 職等：{grade_str}",
         f"🔍 關鍵字：{sub.keywords or '不限'}",
         "",
@@ -354,21 +341,14 @@ async def cmd_mysubscription(update: Update, context) -> None:
     if not sub:
         await update.message.reply_text("尚未設定訂閱條件。\n\n輸入 /subscribe 開始設定。")
     else:
-        rank_types = sub.rank_types
-        type_names = [_RANK_TYPE_NAMES[c] for c in ["1","2","3","4"] if c in rank_types.split(",")]
-        grade_min, grade_max = sub.rank_grade_min, sub.rank_grade_max
-        if grade_min == 0 and grade_max == 0:
-            grade_str = "不限"
-        elif grade_min == grade_max:
-            grade_str = f"{grade_min}職等"
-        else:
-            grade_str = f"{grade_min}-{grade_max}職等"
+        type_names = rank_names(sub.rank_types)
+        grade_str = grade_label(sub.rank_grade_min, sub.rank_grade_max, "不限")
         await update.message.reply_text("\n".join([
             "📋 目前訂閱設定",
             "",
-            f"📍 地點：{sub.work_place_names.replace(',', '、') or '不限'}",
+            f"📍 地點：{comma_to_jap(sub.work_place_names) or '不限'}",
             f"👔 官等：{'、'.join(type_names) or '不限'}",
-            f"🗂 職系：{sub.sysnam_grp_name or '不限'}" + (f"（{sub.sysnam_names.replace(',','、')}）" if sub.sysnam_names else ""),
+            f"🗂 職系：{sub.sysnam_grp_name or '不限'}" + (f"（{comma_to_jap(sub.sysnam_names)}）" if sub.sysnam_names else ""),
             f"📊 職等：{grade_str}",
             f"🔍 關鍵字：{sub.keywords or '不限'}",
             "",
@@ -465,7 +445,7 @@ async def handle_callback(update: Update, context) -> None:
 
         if data == "LC:CONFIRM":
             names = pending.get("work_place_names", "不限")
-            await query.edit_message_text(f"📍 地點：{names.replace(',', '、') or '不限'} ✓")
+            await query.edit_message_text(f"📍 地點：{comma_to_jap(names) or '不限'} ✓")
             await _ask_rank_types(user_id, chat_id, context.bot)
             return
 
@@ -474,7 +454,7 @@ async def handle_callback(update: Update, context) -> None:
         selected_codes = set(c for c in pending.get("rank_types", "").split(",") if c)
 
         def _rank_kb(sel: set) -> InlineKeyboardMarkup:
-            rank_opts = [{"value": c, "text": n} for c, n in _RANK_TYPE_NAMES.items()]
+            rank_opts = [{"value": c, "text": n} for c, n in RANK_TYPE_NAMES.items()]
             rows = []
             for i in range(0, len(rank_opts), _ITEMS_PER_ROW):
                 row = []
@@ -489,7 +469,7 @@ async def handle_callback(update: Update, context) -> None:
             return InlineKeyboardMarkup(rows)
 
         def _rank_status(sel: set) -> str:
-            names = [_RANK_TYPE_NAMES[c] for c in ["1","2","3","4"] if c in sel]
+            names = rank_names(",".join(sel))
             return "、".join(names) if names else "（未選擇，點確定等於不限）"
 
         if data.startswith("RC:") and data not in ("RC:CONFIRM", "RC:ALL"):
@@ -513,7 +493,7 @@ async def handle_callback(update: Update, context) -> None:
 
         if data == "RC:CONFIRM":
             selected_codes = set(c for c in pending.get("rank_types", "").split(",") if c)
-            type_names = [_RANK_TYPE_NAMES[c] for c in ["1","2","3","4"] if c in selected_codes]
+            type_names = rank_names(",".join(selected_codes))
             await query.edit_message_text(f"👔 官等：{'、'.join(type_names) or '不限'} ✓")
             await _ask_sysnam_grp(user_id, chat_id, context.bot)
             return
@@ -596,7 +576,7 @@ async def handle_message(update: Update, context) -> None:
     text    = update.message.text.strip()
     step    = _conv.get(user_id, {}).get("step", "idle")
 
-    logger.info(f"Telegram user={user_id} step={step!r} text={text[:50]!r}")
+    logger.info(f"Telegram user={user_id} step={step!r}")
 
     # 記錄使用者
     try:
@@ -630,7 +610,7 @@ async def handle_message(update: Update, context) -> None:
             "rank_grade_min": lo,
             "rank_grade_max": hi,
         })
-        grade_str = f"{lo}-{hi}職等" if lo != hi else (f"{lo}職等" if lo else "不限")
+        grade_str = grade_label(lo, hi, "不限")
         await update.message.reply_text(f"📊 職等：{grade_str} ✓")
         await _ask_keywords(user_id, chat_id, context.bot)
         return
@@ -679,7 +659,10 @@ async def init_telegram(webhook_url: str = "") -> None:
     await _tg_app.start()
 
     if webhook_url:
-        await _tg_app.bot.set_webhook(webhook_url)
+        await _tg_app.bot.set_webhook(
+            webhook_url,
+            secret_token=TELEGRAM_WEBHOOK_SECRET or None,
+        )
         logger.info(f"Telegram webhook 已設定：{webhook_url}")
     else:
         logger.warning("未設定 Telegram webhook URL，bot 不接收訊息（僅限本機 ngrok 測試）")

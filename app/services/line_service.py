@@ -32,6 +32,7 @@ from app.db.database import delete_subscription, get_subscription, save_subscrip
 from app.models.subscription import Subscription
 from app.services.query_service import handle_user_query
 from app.utils.config import LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET
+from app.utils.formatting import RANK_TYPE_NAMES, comma_to_jap, grade_label, rank_names
 from app.utils.logger import logger
 
 configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
@@ -46,14 +47,6 @@ _LOC_PAGE_SIZE = 9
 _NAV_NEXT  = "下一頁▶"
 _NAV_PREV  = "◀上一頁"
 _SKIP      = "略過"
-
-# 官等代碼 → 名稱
-_RANK_TYPE_NAMES = {
-    "1": "簡任",
-    "2": "薦任",
-    "3": "委任",
-    "4": "其他",
-}
 
 # 各使用者的對話狀態
 _conv: dict[str, dict] = {}
@@ -233,14 +226,14 @@ def _ask_rank_types(user_id: str, reply_token: str):
 
     # 建立 Quick Reply 選項
     items = []
-    for code, name in _RANK_TYPE_NAMES.items():
+    for code, name in RANK_TYPE_NAMES.items():
         label = f"✅ {name}" if code in selected_codes else name
         items.append(QuickReplyItem(action=MessageAction(label=label, text=f"官等:{name}")))
 
     items.append(QuickReplyItem(action=MessageAction(label="不限官等", text="不限官等")))
     items.append(QuickReplyItem(action=MessageAction(label="✅ 確定", text="官等:確定")))
 
-    selected_names = [_RANK_TYPE_NAMES[c] for c in ["1","2","3","4"] if c in selected_codes]
+    selected_names = rank_names(",".join(selected_codes))
     current = f"已選：{', '.join(selected_names)}" if selected_names else "（未選擇，等於不限）"
     _conv[user_id].update({"step": "setup_rank_types"})
     _reply(reply_token, TextMessage(
@@ -324,7 +317,7 @@ def _save_and_confirm(user_id: str, reply_token: str):
     """步驟 7：儲存訂閱並顯示確認訊息。"""
     pending = _conv.get(user_id, {}).get("pending", {})
     rank_types = pending.get("rank_types", "")
-    type_names = [_RANK_TYPE_NAMES[c] for c in ["1","2","3","4"] if c in rank_types.split(",")]
+    type_names = rank_names(rank_types)
 
     sub = Subscription(
         platform          = "line",
@@ -342,21 +335,14 @@ def _save_and_confirm(user_id: str, reply_token: str):
     save_subscription(sub)
     _conv.pop(user_id, None)
 
-    grade_min = sub.rank_grade_min
-    grade_max = sub.rank_grade_max
-    if grade_min == 0 and grade_max == 0:
-        grade_str = "不限"
-    elif grade_min == grade_max:
-        grade_str = f"{grade_min}職等"
-    else:
-        grade_str = f"{grade_min}-{grade_max}職等"
+    grade_str = grade_label(sub.rank_grade_min, sub.rank_grade_max, "不限")
 
     _reply(reply_token, TextMessage(text="\n".join([
         "✅ 訂閱設定完成！",
         "",
-        f"📍 地點：{sub.work_place_names.replace(',', '、')}",
+        f"📍 地點：{comma_to_jap(sub.work_place_names)}",
         f"👔 官等：{'、'.join(type_names) or '不限'}",
-        f"🗂 職系：{sub.sysnam_grp_name}" + (f"（{sub.sysnam_names.replace(',','、')}）" if sub.sysnam_names else ""),
+        f"🗂 職系：{sub.sysnam_grp_name}" + (f"（{comma_to_jap(sub.sysnam_names)}）" if sub.sysnam_names else ""),
         f"📊 職等：{grade_str}",
         f"🔍 關鍵字：{sub.keywords or '不限'}",
         "",
@@ -421,7 +407,7 @@ def _handle_rank_types_step(user_id: str, text: str, reply_token: str):
     # 點選官等名稱（格式 "官等:薦任"）
     if text.startswith("官等:"):
         name = text[3:]
-        code = next((c for c, n in _RANK_TYPE_NAMES.items() if n == name), None)
+        code = next((c for c, n in RANK_TYPE_NAMES.items() if n == name), None)
         if code:
             if code in current_codes:
                 current_codes.remove(code)  # 取消選取
@@ -501,7 +487,7 @@ def handle_message(event: MessageEvent) -> None:
     reply_token = event.reply_token
     step        = _conv.get(user_id, {}).get("step", "idle")
 
-    logger.info(f"LINE user={user_id[:8]} step={step!r} text={text[:50]!r}")
+    logger.info(f"LINE user={user_id[:8]} step={step!r}")
 
     # 記錄使用者
     try:
@@ -522,21 +508,14 @@ def handle_message(event: MessageEvent) -> None:
                 text="尚未設定訂閱條件。\n\n輸入「訂閱」開始設定。"
             ))
         else:
-            rank_types = sub.rank_types
-            type_names = [_RANK_TYPE_NAMES[c] for c in ["1","2","3","4"] if c in rank_types.split(",")]
-            grade_min, grade_max = sub.rank_grade_min, sub.rank_grade_max
-            if grade_min == 0 and grade_max == 0:
-                grade_str = "不限"
-            elif grade_min == grade_max:
-                grade_str = f"{grade_min}職等"
-            else:
-                grade_str = f"{grade_min}-{grade_max}職等"
+            type_names = rank_names(sub.rank_types)
+            grade_str = grade_label(sub.rank_grade_min, sub.rank_grade_max, "不限")
             _reply(reply_token, TextMessage(text="\n".join([
                 "📋 目前訂閱設定",
                 "",
-                f"📍 地點：{sub.work_place_names.replace(',', '、') or '不限'}",
+                f"📍 地點：{comma_to_jap(sub.work_place_names) or '不限'}",
                 f"👔 官等：{'、'.join(type_names) or '不限'}",
-                f"🗂 職系：{sub.sysnam_grp_name or '不限'}" + (f"（{sub.sysnam_names.replace(',','、')}）" if sub.sysnam_names else ""),
+                f"🗂 職系：{sub.sysnam_grp_name or '不限'}" + (f"（{comma_to_jap(sub.sysnam_names)}）" if sub.sysnam_names else ""),
                 f"📊 職等：{grade_str}",
                 f"🔍 關鍵字：{sub.keywords or '不限'}",
                 "",

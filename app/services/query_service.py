@@ -13,23 +13,8 @@
 from app.db.database import get_subscription, search_jobs
 from app.models.job import Job
 from app.utils.config import DETAIL_PAGE_URL, TOP_K_RESULTS
+from app.utils.formatting import comma_to_jap, grade_label, rank_names
 from app.utils.logger import logger
-
-
-# ── 格式化工具 ────────────────────────────────────────────────────────────────
-
-def _grade_label(grade_min: int, grade_max: int) -> str:
-    """
-    將職等數字轉為顯示標籤。
-    (5, 9) → '5-9職等'
-    (9, 9) → '9職等'
-    (0, 0) → '不分職等'
-    """
-    if grade_min == 0 and grade_max == 0:
-        return "不分職等"
-    if grade_min == grade_max:
-        return f"{grade_min}職等"
-    return f"{grade_min}-{grade_max}職等"
 
 
 def _format_period(deadline_start: str, deadline_end: str) -> str:
@@ -63,7 +48,7 @@ def _format_job_block(idx: int, job: Job, platform: str = "line") -> str:
     meta2 = []
     if job.job_series:
         meta2.append(f"🗂 {job.job_series}")
-    grade = _grade_label(job.rank_grade_min, job.rank_grade_max)
+    grade = grade_label(job.rank_grade_min, job.rank_grade_max)
     if grade:
         meta2.append(f"📋 {grade}")
     if meta2:
@@ -155,7 +140,7 @@ def handle_user_query(
         )
 
     top = jobs[:TOP_K_RESULTS]
-    loc_label = sub.work_place_names.replace(",", "、") if sub.work_place_names else "全部地區"
+    loc_label = comma_to_jap(sub.work_place_names) if sub.work_place_names else "全部地區"
     header = f"🔍 {loc_label}｜找到 {len(jobs)} 個職缺\n（顯示前 {len(top)} 筆）"
     blocks = [_format_job_block(i + 1, job, platform) for i, job in enumerate(top)]
 
@@ -166,17 +151,15 @@ def handle_user_query(
 def _build_cond_summary(sub) -> str:
     """建立訂閱條件摘要字串（用於「找不到職缺」訊息）。"""
     lines = []
-    lines.append(f"地點：{sub.work_place_names.replace(',', '、') or '不限'}")
+    lines.append(f"地點：{comma_to_jap(sub.work_place_names) or '不限'}")
     if sub.rank_types:
-        type_map = {"1": "簡任", "2": "薦任", "3": "委任", "4": "其他"}
-        names = [type_map.get(c, c) for c in sub.rank_types.split(",") if c]
-        lines.append(f"官等：{'、'.join(names)}")
+        lines.append(f"官等：{'、'.join(rank_names(sub.rank_types))}")
     if sub.rank_grade_min or sub.rank_grade_max:
-        lines.append(f"職等：{_grade_label(sub.rank_grade_min, sub.rank_grade_max)}")
+        lines.append(f"職等：{grade_label(sub.rank_grade_min, sub.rank_grade_max)}")
     if sub.sysnam_grp_name and sub.sysnam_grp_name != "不限":
         lines.append(f"職系：{sub.sysnam_grp_name}")
     if sub.sysnam_names:
-        lines.append(f"職系細項：{sub.sysnam_names.replace(',', '、')}")
+        lines.append(f"職系細項：{comma_to_jap(sub.sysnam_names)}")
     if sub.keywords:
         lines.append(f"關鍵字：{sub.keywords}")
     return "\n".join(lines)

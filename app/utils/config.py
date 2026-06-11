@@ -36,3 +36,9 @@ TOP_K_RESULTS = int(os.getenv("TOP_K_RESULTS", "10"))
 # 職缺詳細頁 URL（Render 自動提供 RENDER_EXTERNAL_URL）
 _render_url = os.getenv("RENDER_EXTERNAL_URL", "https://gov-job-linebot.onrender.com").rstrip("/")
 DETAIL_PAGE_URL = f"{_render_url}/detail"
+
+# 詳細頁爬取間隔秒數（本機爬蟲用）
+CRAWL_DETAIL_DELAY: float = float(os.getenv("CRAWL_DETAIL_DELAY", "0.3"))
+
+# 保護 Telegram webhook 的 secret token（Render 環境變數設定後需重新部署）
+TELEGRAM_WEBHOOK_SECRET: str = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")

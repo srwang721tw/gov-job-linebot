@@ -10,7 +10,6 @@
 - .env 檔案含 LINE_CHANNEL_ACCESS_TOKEN，或事先 export 環境變數
 """
 import io
-import json
 import os
 import sys
 from pathlib import Path

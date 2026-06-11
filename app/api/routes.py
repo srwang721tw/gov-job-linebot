@@ -1,3 +1,4 @@
+import hmac
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -6,6 +7,7 @@ from linebot.v3.exceptions import InvalidSignatureError
 
 from app.db.database import get_jobs_count, get_subscription_count
 from app.services.line_service import handler
+from app.utils.config import TELEGRAM_WEBHOOK_SECRET
 from app.utils.logger import logger
 
 router = APIRouter()
@@ -76,6 +78,11 @@ async def line_webhook(request: Request):
 
 @router.post("/telegram-webhook")
 async def telegram_webhook(request: Request):
+    if TELEGRAM_WEBHOOK_SECRET:
+        token = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if not hmac.compare_digest(token, TELEGRAM_WEBHOOK_SECRET):
+            raise HTTPException(status_code=403, detail="Forbidden")
+
     from app.services.telegram_service import get_telegram_app
     tg = get_telegram_app()
     if tg is None:
