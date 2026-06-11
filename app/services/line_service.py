@@ -77,10 +77,10 @@ _HELP_TEXT = "\n".join([
     "  → 清除所有條件",
 ])
 
-_TRIGGERS_SUBSCRIBE  = {"訂閱", "設定條件", "設定訂閱", "訂閱設定", "重新訂閱"}
-_TRIGGERS_MY_SUB     = {"我的訂閱", "查看訂閱", "訂閱資訊", "目前條件"}
-_TRIGGERS_DEL_SUB    = {"刪除訂閱", "取消訂閱", "清除訂閱"}
-_TRIGGERS_HELP       = {"說明", "help", "Help", "?", "？"}
+_TRIGGERS_SUBSCRIBE  = {"訂閱", "設定條件", "設定訂閱", "訂閱設定", "重新訂閱", "/subscribe"}
+_TRIGGERS_MY_SUB     = {"我的訂閱", "查看訂閱", "訂閱資訊", "目前條件", "/mysubscription"}
+_TRIGGERS_DEL_SUB    = {"刪除訂閱", "取消訂閱", "清除訂閱", "/deletesubscription"}
+_TRIGGERS_HELP       = {"說明", "help", "Help", "?", "？", "/help"}
 _TRIGGERS_RESULTS    = {"/results", "results", "查看職缺", "最新職缺"}
 
 
