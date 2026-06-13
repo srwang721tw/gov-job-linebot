@@ -31,9 +31,9 @@ def main() -> int:
 
     proxy_dict = get_working_proxy()
     if proxy_dict is None:
-        logger.error("無可用 proxy，今日跳過（可本機手動執行 run_crawl.py）")
-        sys.exit(1)
-    logger.info(f"使用 proxy: {list(proxy_dict.values())[0]}")
+        logger.warning("無可用 proxy，改用直接連線（本機執行適用）")
+    else:
+        logger.info(f"使用 proxy: {list(proxy_dict.values())[0]}")
 
     jobs = crawl_jobs(
         proxy_dict=proxy_dict,
