@@ -62,12 +62,14 @@ _RETRY = Retry(
 )
 
 
-def _new_session() -> requests.Session:
+def _new_session(proxy_dict: dict | None = None) -> requests.Session:
     """建立帶重試策略的 requests Session（強制 IPv4）。"""
     s = requests.Session()
     adapter = HTTPAdapter(max_retries=_RETRY)
     s.mount("https://", adapter)
     s.mount("http://", adapter)
+    if proxy_dict:
+        s.proxies.update(proxy_dict)
     return s
 
 
@@ -423,6 +425,7 @@ def crawl_jobs(
     lookback_days: int = 30,
     max_pages: int = MAX_CRAWL_PAGES,
     fetch_detail: bool = False,
+    proxy_dict: dict | None = None,
 ) -> List[Job]:
     """
     依條件爬取職缺。
@@ -440,7 +443,7 @@ def crawl_jobs(
         max_pages:     最多爬幾頁（0 = 不限）
         fetch_detail:  是否同時抓取詳細頁（排程爬取時用）
     """
-    session   = _new_session()
+    session   = _new_session(proxy_dict)
     date_to   = _roc_today()
     date_from = _roc_days_ago(lookback_days)
     logger.info(

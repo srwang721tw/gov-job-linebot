@@ -18,7 +18,7 @@ LINE + Telegram 聊天機器人，讓使用者設定訂閱條件查詢台灣政�
 | Telegram | python-telegram-bot v20・InlineKeyboard 多選・Webhook 簽章驗證 |
 | 搜尋 | 多地點 IN、官等代碼 LIKE、職等範圍、職系 IN、多關鍵字 OR + similarity 排序 |
 | 查詢 UI | `/detail` 靜態頁面：RWD 卡片/表格、多欄篩選、分頁、排序（桌機+手機） |
-| 部署 | Render（免費 Web Service） + Neon PostgreSQL（免費） |
+| 部署 | Render（免費 Web Service + Cron Job） + Neon PostgreSQL（免費） |
 
 ---
 
@@ -37,10 +37,13 @@ FastAPI（Render）
          ↓ SQL 搜尋 + pg_trgm similarity
     jobs 表（Neon PostgreSQL）
 
-爬蟲（本機手動執行）
-    python scripts/test_crawl.py
+爬蟲（Render Cron Job，每天台灣凌晨 4 點）
+    python scripts/run_crawl.py
+         ↓ proxynova.com 動態取得台灣 proxy
+         ↓ 測試 proxy → 選第一個可用
          ↓ UPSERT
     jobs 表 → delete_expired_jobs()
+    （無可用 proxy 時 exit(1)，可本機手動補跑）
 ```
 
 ---
@@ -136,17 +139,32 @@ MAX_CRAWL_PAGES=1 python scripts/test_crawl.py   # 只爬 1 頁（快速煙霧�
 
 ---
 
-## 爬蟲使用（本機手動執行）
+## 爬蟲
+
+### Render 排程（自動）
+
+每天台灣凌晨 4 點由 Render Cron Job 自動執行 `scripts/run_crawl.py`：
+1. 從 proxynova.com 抓取台灣 proxy 清單
+2. 依序測試，選第一個可連到 DGPA 的 proxy
+3. 全量爬取 + UPSERT + 清除過期職缺
+
+執行 log 可在 Render Dashboard → gov-job-crawler → Logs 查看。
+
+### 手動補跑（proxy 失敗時）
 
 ```bash
 # 完整爬取（含詳細頁）
-python scripts/test_crawl.py
+python scripts/run_crawl.py
 
 # 限制 1 頁（煙霧測試）
-MAX_CRAWL_PAGES=1 python scripts/test_crawl.py
+MAX_CRAWL_PAGES_SCHEDULED=1 python scripts/run_crawl.py
 ```
 
-爬取結果 UPSERT 到 jobs 表，並自動刪除截止日過期的職缺。
+### 煙霧測試（不存 DB，只確認爬蟲邏輯）
+
+```bash
+MAX_CRAWL_PAGES=1 python scripts/test_crawl.py
+```
 
 ---
 
@@ -172,11 +190,21 @@ MAX_CRAWL_PAGES=1 python scripts/test_crawl.py
    | `TELEGRAM_BOT_TOKEN` | Telegram token（可選） |
    | `TELEGRAM_WEBHOOK_SECRET` | 自訂隨機字串（建議設定） |
 
-### 3. 設定 LINE Webhook
+### 3. 設定 Render Cron Job（爬蟲排程）
+
+`render.yaml` 已包含 cron job 設定，部署後在 Render Dashboard 手動為 `gov-job-crawler` 服務設定環境變數：
+
+| 變數 | 值 |
+|------|----|
+| `DATABASE_URL` | Neon 連線字串（同 web service） |
+
+設定完成後，每天台灣凌晨 4 點自動執行爬蟲。
+
+### 4. 設定 LINE Webhook
 
 Messaging API → Webhook URL：`https://<render-url>/webhook` → Verify → 開啟 Use webhook
 
-### 4. 設定 Telegram Webhook
+### 5. 設定 Telegram Webhook
 
 ```bash
 curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<render-url>/telegram-webhook&secret_token=<TELEGRAM_WEBHOOK_SECRET>"

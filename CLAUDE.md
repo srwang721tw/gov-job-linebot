@@ -10,10 +10,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 格式：`git commit -m "類型(範圍): 說明"`
 - push 指令：`git push origin main`
 
-## 專案說明（v3.2）
+## 專案說明（v3.3）
 
 LINE + Telegram 聊天機器人，讓使用者設定工作地點（多選）、官等類別（多選）、職系、職務列等區間、關鍵字等訂閱條件。
-爬蟲**本機手動執行**，爬取台灣行政院人事行政總處事求人（`web3.dgpa.gov.tw`）的政府職缺（含詳細頁），
+爬蟲透過 **proxynova.com 動態 proxy** 在 **Render Cron Job** 每天台灣凌晨 4 點自動執行，爬取台灣行政院人事行政總處事求人（`web3.dgpa.gov.tw`）的政府職缺（含詳細頁），
 儲存至 Neon PostgreSQL 的 `jobs` 資料表。查詢時直接從 DB 搜尋，速度快且資料完整。
 **無 LLM、無向量搜尋**，搜尋用 pg_trgm 模糊比對 + 多關鍵字 similarity 排序。
 
@@ -26,7 +26,11 @@ pip install -r requirements.txt
 # 本機啟動（支援熱重載）
 uvicorn app.main:app --reload
 
-# 煙霧測試爬蟲（含詳細頁）
+# 正式爬蟲（含 proxy + 存 DB）
+python scripts/run_crawl.py
+MAX_CRAWL_PAGES_SCHEDULED=1 python scripts/run_crawl.py  # 只爬 1 頁（測試）
+
+# 煙霧測試爬蟲（不存 DB，確認爬蟲邏輯）
 python scripts/test_crawl.py
 MAX_CRAWL_PAGES=1 python scripts/test_crawl.py
 
@@ -51,7 +55,7 @@ curl http://localhost:8000/health
 
 資料目錄 `data/sqlite/` 啟動時自動建立（SQLite 模式）。
 
-## 架構（v3.2）
+## 架構（v3.3）
 
 ```
 前端 (LINE / Telegram)
@@ -67,10 +71,12 @@ FastAPI (Render)
     jobs 表（Neon PostgreSQL）
          ↓ 格式化 → 回覆
 
-爬蟲（本機手動執行）
-    python scripts/test_crawl.py
-    → scraper（is_office=True，列表頁 + 詳細頁並行爬取）
+爬蟲（Render Cron Job，每天台灣凌晨 4 點）
+    python scripts/run_crawl.py
+    → proxy_manager（proxynova.com 抓台灣 proxy → 測試 → 選第一個可用）
+    → scraper（proxy 連線，列表頁 + 詳細頁並行爬取）
     → jobs 表 UPSERT → delete_expired_jobs()
+    （無可用 proxy → exit(1)，可本機手動補跑）
 ```
 
 **查詢流程：**
@@ -87,8 +93,13 @@ FastAPI (Render)
 
 ## 關鍵實作細節
 
+**Proxy 管理（`app/crawler/proxy_manager.py`）：** DGPA 僅允許台灣 IP，Render 美國 IP 需透過 proxy。
+- `get_working_proxy()` → 爬 proxynova.com 台灣 proxy 清單 → 依序測試 → 回傳第一個可用 dict
+- proxy 測試：GET DGPA 首頁，確認回應含 `__VIEWSTATE`（確認為真實 DGPA 頁面）
+- 無可用 proxy → 回傳 None → run_crawl.py exit(1)，Render log 可見
+
 **爬蟲（`app/crawler/scraper.py`）：** ASP.NET WebForms，每次分頁帶 `__VIEWSTATE` POST。
-- 排程爬取固定 `is_office=True`（須具公務人員任用資格職缺）
+- `crawl_jobs(proxy_dict=None, ...)` → `_new_session(proxy_dict)` → 設定 `session.proxies`
 - 列表頁 md_hides 欄位順序：**職系**（index 0）→ **官等/列等**（index 1）→ 地點（2）→ 截止日（3）
 - 截止日格式：民國年 "115/05/30~115/06/08"，`_parse_deadline_range()` 轉為 ISO start+end
 - `_parse_rank_grades()` 從官等文字提取最低/最高職等（0=無法解析）
@@ -155,13 +166,15 @@ DATE_FROM / DATE_TO     民國年格式 YYYMMDD
 
 ## 部署（Render + Neon）
 
-使用 `render.yaml`：
-- Build command：`pip install -r requirements.txt`
-- Start command：`uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- Healthcheck：`/health`
+使用 `render.yaml`（兩個服務）：
+- **Web Service**：`uvicorn app.main:app`（LINE/Telegram webhook + /detail 頁面）
+- **Cron Job**（`gov-job-crawler`）：`python scripts/run_crawl.py`，每天 20:00 UTC（台灣凌晨 4 點）
 
-**必要環境變數（Render Dashboard 手動設定）：**
+**Web Service 必要環境變數（Render Dashboard 手動設定）：**
 `LINE_CHANNEL_ACCESS_TOKEN`、`LINE_CHANNEL_SECRET`、`DATABASE_URL`（Neon）
+
+**Cron Job 必要環境變數：**
+`DATABASE_URL`（同 Neon 連線字串，在 gov-job-crawler 服務單獨設定）
 
 **建議設定：**
 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_WEBHOOK_SECRET`（隨機字串，部署後自動 set_webhook）
