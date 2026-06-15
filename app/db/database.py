@@ -459,6 +459,11 @@ def upsert_jobs(jobs: list[Job]) -> None:
     """
     if not jobs:
         return
+    # 同批次內可能有重複 job_id（爬蟲跨頁重複），保留最後一筆
+    seen: dict[str, Job] = {}
+    for j in jobs:
+        seen[j.job_id] = j
+    jobs = list(seen.values())
     now = datetime.now(timezone.utc).isoformat()
     params = [_job_to_tuple(j, now) for j in jobs]
 
