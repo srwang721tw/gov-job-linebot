@@ -27,8 +27,12 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 
 # 正式爬蟲（含 proxy + 存 DB）
+python scripts/run_crawl.py --proxy                          # Render 用（透過 proxy）
+MAX_CRAWL_PAGES_SCHEDULED=1 python scripts/run_crawl.py --proxy  # 只爬 1 頁（測試）
+
+# 本機手動執行（直接連線，無 proxy）
 python scripts/run_crawl.py
-MAX_CRAWL_PAGES_SCHEDULED=1 python scripts/run_crawl.py  # 只爬 1 頁（測試）
+MAX_CRAWL_PAGES_SCHEDULED=1 python scripts/run_crawl.py  # 只爬 1 頁（本機）
 
 # 煙霧測試爬蟲（不存 DB，確認爬蟲邏輯）
 python scripts/test_crawl.py

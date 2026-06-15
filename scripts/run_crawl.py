@@ -2,22 +2,17 @@
 """
 爬蟲入口（v3.3）：Render cron 排程 + 本機手動補跑。
 
-功能：
-  1. 從 proxynova.com 動態取得台灣 proxy，測試後選第一個可用的
-  2. 若無可用 proxy 則 exit(1)（可本機手動補跑）
-  3. 透過 proxy 全量爬取 DGPA 職缺（含詳細頁）
-  4. UPSERT 至 Neon PostgreSQL，並刪除截止日過期職缺
-
 用法：
-  python scripts/run_crawl.py
-  MAX_CRAWL_PAGES_SCHEDULED=1 python scripts/run_crawl.py  # 測試：只爬 1 頁
+  python scripts/run_crawl.py             # 直接連線（本機，台灣 IP）
+  python scripts/run_crawl.py --proxy     # 透過 proxy（Render 美國 IP 用）
+  MAX_CRAWL_PAGES_SCHEDULED=1 python scripts/run_crawl.py --proxy  # 只爬 1 頁
 """
+import argparse
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.crawler.proxy_manager import get_working_proxy
 from app.crawler.scraper import crawl_jobs
 from app.db.database import delete_expired_jobs, init_db, upsert_jobs
 from app.utils.config import MAX_CRAWL_PAGES_SCHEDULED
@@ -25,15 +20,23 @@ from app.utils.logger import logger
 
 
 def main() -> int:
-    logger.info("=== 職缺爬取開始 ===")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--proxy", action="store_true", help="透過 proxynova.com 台灣 proxy 連線（Render 用）")
+    args = parser.parse_args()
 
+    logger.info("=== 職缺爬取開始 ===")
     init_db()
 
-    proxy_dict = get_working_proxy()
-    if proxy_dict is None:
-        logger.warning("無可用 proxy，改用直接連線（本機執行適用）")
-    else:
+    proxy_dict = None
+    if args.proxy:
+        from app.crawler.proxy_manager import get_working_proxy
+        proxy_dict = get_working_proxy()
+        if proxy_dict is None:
+            logger.error("無可用 proxy，結束")
+            return -1
         logger.info(f"使用 proxy: {list(proxy_dict.values())[0]}")
+    else:
+        logger.info("直接連線（無 proxy）")
 
     jobs = crawl_jobs(
         proxy_dict=proxy_dict,

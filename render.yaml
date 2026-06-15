@@ -24,7 +24,7 @@ services:
     plan: free
     schedule: "0 20 * * *"      # 20:00 UTC = 台灣 04:00（UTC+8）
     buildCommand: pip install -r requirements.txt
-    startCommand: python scripts/run_crawl.py
+    startCommand: python scripts/run_crawl.py --proxy
     envVars:
       - key: DATABASE_URL
         sync: false              # 與 web service 使用同一 Neon DB
