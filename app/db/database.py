@@ -1,17 +1,31 @@
-"""
-資料庫抽象層（v3.1）：支援兩個後端
-  - 本機開發：SQLite（無需設定 DATABASE_URL）
-  - 正式環境：Neon PostgreSQL（設定 DATABASE_URL 環境變數）
+"""Dual-backend database abstraction layer (SQLite / Neon PostgreSQL).
 
-資料表：
-  line_user     LINE Bot 使用者
-  telegram_user Telegram Bot 使用者
-  subscription  使用者訂閱條件（LINE + Telegram 共用）
-  jobs          每日爬取的政府職缺資料（含詳細頁）
+Backend selection:
+    - ``DATABASE_URL`` **not set** → SQLite at ``SQLITE_PATH``
+      (zero-config local development).
+    - ``DATABASE_URL`` **set** → Neon PostgreSQL via ``psycopg2``
+      (production on Render).
 
-v3.1 主要變更：
-  subscription: 多地點/多官等/職務列等/職系細項/多關鍵字
-  jobs: 統一日期為 YYYY-MM-DD，新增 rank_grade_min/max、rank_type_codes、search_text
+Tables:
+    - ``line_user``     — LINE Bot user records.
+    - ``telegram_user`` — Telegram Bot user records.
+    - ``subscription``  — Per-user job-alert subscriptions (both platforms).
+    - ``jobs``          — Daily crawled job postings with full-text index.
+
+Key design decisions:
+    - ``_run()`` translates ``?`` placeholders to ``%s`` for psycopg2 so
+      the same SQL strings work on both backends.
+    - ``upsert_jobs()`` deduplicates by ``job_id`` within the batch
+      (prevents ``CardinalityViolation`` when a job appears on multiple
+      list pages), then uses ``execute_values`` (PostgreSQL) or
+      ``executemany`` (SQLite) for bulk insertion.
+    - The ``ON CONFLICT(job_id) DO UPDATE`` UPSERT uses ``CASE`` logic
+      to preserve existing rich values (qualifications, work_items) when
+      a subsequent crawl returns an empty string for those fields.
+    - ``search_jobs()`` scores results with ``pg_trgm similarity()``
+      across four fields; SQLite falls back to ``LIKE``.
+    - ``init_db()`` runs ``ALTER TABLE … ADD COLUMN IF NOT EXISTS``
+      migrations so schema updates are applied automatically on restart.
 """
 import re
 import sqlite3
@@ -272,6 +286,17 @@ _UPSERT_JOB      = f"INSERT INTO jobs {_UPSERT_COLS} VALUES (?,?,?,?,?,?,?,?,?,?
 
 @contextmanager
 def get_conn():
+    """Context manager that yields a database connection with auto-commit.
+
+    Opens a PostgreSQL connection (``psycopg2`` with ``RealDictCursor``)
+    when ``DATABASE_URL`` is set, otherwise opens a SQLite connection
+    (``sqlite3`` with ``sqlite3.Row`` factory).  Commits on exit;
+    rolls back and re-raises on any exception.
+
+    Yields:
+        An open database connection (``psycopg2.connection`` or
+        ``sqlite3.Connection``).
+    """
     if _IS_POSTGRES:
         import psycopg2
         import psycopg2.extras
@@ -292,7 +317,16 @@ def get_conn():
 
 
 def _run(conn, sql: str, params: tuple = ()):
-    """執行 SQL，自動將 ? 轉為 %s（psycopg2 格式）。"""
+    """Execute a SQL statement on either backend.
+
+    Translates ``?`` parameter placeholders to ``%s`` for psycopg2
+    so the same SQL strings can be used for both backends.
+
+    Args:
+        conn: Open database connection from ``get_conn()``.
+        sql: SQL statement with ``?`` placeholders.
+        params: Tuple of parameter values to bind.
+    """
     if _IS_POSTGRES:
         cur = conn.cursor()
         cur.execute(sql.replace("?", "%s"), params)
@@ -363,7 +397,12 @@ def init_db() -> None:
 # ── 使用者 CRUD ────────────────────────────────────────────────────────────────
 
 def upsert_line_user(line_user_id: str, display_name: str = "") -> None:
-    """記錄 LINE 使用者（每次互動時更新）。"""
+    """Insert or update a LINE user record on every interaction.
+
+    Args:
+        line_user_id: LINE user ID (``U...`` string).
+        display_name: Display name from the LINE profile. Defaults to ``""``.
+    """
     now = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
         _run(conn, _UPSERT_LINE_USER, (line_user_id, display_name, now))
@@ -374,7 +413,13 @@ def upsert_telegram_user(
     username: str = "",
     first_name: str = "",
 ) -> None:
-    """記錄 Telegram 使用者（每次互動時更新）。"""
+    """Insert or update a Telegram user record on every interaction.
+
+    Args:
+        telegram_user_id: Telegram numeric user ID.
+        username: Telegram ``@username`` (may be empty). Defaults to ``""``.
+        first_name: User's first name from the Telegram profile. Defaults to ``""``.
+    """
     now = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
         _run(conn, _UPSERT_TELEGRAM_USER, (telegram_user_id, username, first_name, now))
@@ -383,6 +428,11 @@ def upsert_telegram_user(
 # ── 訂閱 CRUD ──────────────────────────────────────────────────────────────────
 
 def save_subscription(sub: Subscription) -> None:
+    """Persist a subscription, inserting or updating by platform + user ID.
+
+    Args:
+        sub: ``Subscription`` model instance to save.
+    """
     now = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
         _run(conn, _UPSERT_SUBSCRIPTION, (
@@ -396,6 +446,15 @@ def save_subscription(sub: Subscription) -> None:
 
 
 def get_subscription(platform: str, platform_user_id: str) -> Subscription | None:
+    """Retrieve a user's subscription by platform and user ID.
+
+    Args:
+        platform: ``"line"`` or ``"telegram"``.
+        platform_user_id: Platform-specific user identifier.
+
+    Returns:
+        ``Subscription`` instance if found, ``None`` otherwise.
+    """
     with get_conn() as conn:
         row = _run(
             conn,
@@ -421,6 +480,12 @@ def get_subscription(platform: str, platform_user_id: str) -> Subscription | Non
 
 
 def delete_subscription(platform: str, platform_user_id: str) -> None:
+    """Delete a user's subscription.
+
+    Args:
+        platform: ``"line"`` or ``"telegram"``.
+        platform_user_id: Platform-specific user identifier.
+    """
     with get_conn() as conn:
         _run(
             conn,
@@ -431,6 +496,11 @@ def delete_subscription(platform: str, platform_user_id: str) -> None:
 
 
 def get_subscription_count() -> int:
+    """Return the total number of active subscriptions.
+
+    Returns:
+        Integer count, or ``0`` on error.
+    """
     with get_conn() as conn:
         row = _run(conn, "SELECT COUNT(*) AS cnt FROM subscription").fetchone()
     if not row:
@@ -441,7 +511,18 @@ def get_subscription_count() -> int:
 # ── 職缺 CRUD ──────────────────────────────────────────────────────────────────
 
 def _job_to_tuple(job: Job, now: str) -> tuple:
-    """Job 物件 → upsert 用的參數 tuple（DRY：PostgreSQL 和 SQLite 共用）。"""
+    """Convert a Job model to a 22-element parameter tuple for UPSERT.
+
+    Shared by both PostgreSQL (``execute_values``) and SQLite
+    (``executemany``) so the field ordering is defined in one place.
+
+    Args:
+        job: ``Job`` model instance.
+        now: ISO 8601 UTC timestamp string for the ``crawled_at`` field.
+
+    Returns:
+        Tuple of 22 values matching the ``_UPSERT_COLS`` column order.
+    """
     return (
         job.job_id, job.title, job.org_name, job.work_place, job.work_place_code,
         job.rank_type, job.rank_type_codes, job.rank_grade_min, job.rank_grade_max,
@@ -453,9 +534,22 @@ def _job_to_tuple(job: Job, now: str) -> tuple:
 
 
 def upsert_jobs(jobs: list[Job]) -> None:
-    """批次 UPSERT 職缺。
-    PostgreSQL：execute_values 單次 SQL（最快）。
-    SQLite：executemany 單一 transaction。
+    """Bulk-upsert job postings, deduplicating by job_id within the batch.
+
+    Deduplication is required because the same job can appear on multiple
+    list pages during a crawl, which would cause a ``CardinalityViolation``
+    in PostgreSQL's ``ON CONFLICT DO UPDATE``.
+
+    PostgreSQL: single ``INSERT … ON CONFLICT … DO UPDATE`` via
+    ``psycopg2.extras.execute_values`` (fastest path).
+    SQLite: ``executemany`` in a single transaction.
+
+    The ``ON CONFLICT`` clause uses ``CASE`` expressions to preserve
+    existing non-empty values when the new row contains empty strings or
+    zeros for detail-page fields.
+
+    Args:
+        jobs: List of ``Job`` model instances to insert or update.
     """
     if not jobs:
         return
@@ -489,17 +583,37 @@ def search_jobs(
     keywords: str = "",
     limit: int = 20,
 ) -> list[Job]:
-    """
-    依條件從 jobs 表搜尋有效職缺（deadline_end >= 今日）。
+    """Search active job postings matching the given subscription filters.
 
-    work_place_codes: 逗號分隔代碼，如 "10,42"（空=不限）
-    rank_types: 逗號分隔代碼，如 "2,3"（空=不限）
-    rank_grade_min/max: 職等篩選（0=不限）
-    sysnam_grp: '' / 'A' / 'B'（'A' 同時包含 sysnam_grp=''）
-    sysnam_names: 逗號分隔職系名稱（空=不限）
-    keywords: 逗號/空格分隔，多關鍵字 OR 比對（空=不限）
+    All parameters default to "no filter" (empty string or 0).  Only
+    jobs with ``deadline_end >= today`` are returned.
 
-    PostgreSQL：用 pg_trgm similarity 排序；SQLite：用 ILIKE。
+    Grade range matching uses an overlap check: a job matches when its
+    ``[rank_grade_min, rank_grade_max]`` interval overlaps with the
+    requested ``[rank_grade_min, rank_grade_max]`` interval.
+
+    PostgreSQL: results are scored by summing ``pg_trgm similarity()``
+    across ``title``, ``org_name``, ``qualifications``, and ``work_items``
+    for each keyword, then ordered by score (DESC) then deadline (ASC).
+    SQLite: falls back to ``LIKE`` matching on ``search_text`` with no
+    relevance scoring.
+
+    Args:
+        work_place_codes: Comma-separated location codes, e.g. ``"10,42"``.
+            Empty string = all locations.
+        rank_types: Comma-separated rank-type codes, e.g. ``"2,3"``.
+            Empty string = all rank types.
+        rank_grade_min: Minimum desired grade (``0`` = no lower bound).
+        rank_grade_max: Maximum desired grade (``0`` = no upper bound).
+        sysnam_grp: ``""`` (all), ``"A"`` (行政類 and ungrouped), ``"B"``
+            (技術類 only).
+        sysnam_names: Comma-separated job-series names.  Empty = all.
+        keywords: Comma- or space-separated search terms.  Multi-keyword
+            OR matching; empty = no keyword filter.
+        limit: Maximum number of rows to return. Defaults to ``20``.
+
+    Returns:
+        List of ``Job`` instances ordered by relevance then deadline.
     """
     from datetime import date
     today = date.today().isoformat()
@@ -589,13 +703,30 @@ def search_jobs(
 
 
 def _split_keywords(raw: str) -> list[str]:
-    """將逗號/空格/頓號分隔的關鍵字字串拆成 list。"""
+    """Split a keyword string on commas, spaces, and full-width delimiters.
+
+    Args:
+        raw: Keyword string, e.g. ``"資訊,工程師"`` or ``"資訊 工程師"``.
+
+    Returns:
+        List of non-empty keyword strings.
+    """
     if not raw:
         return []
     return [k for k in re.split(r"[\s、，,]+", raw.strip()) if k]
 
 
 def _row_to_job(d: dict) -> Job:
+    """Convert a database row dict to a Job model instance.
+
+    Args:
+        d: Row dict from ``get_conn()`` (RealDictCursor or sqlite3.Row
+           converted to dict).
+
+    Returns:
+        Populated ``Job`` model with ``None`` / missing values replaced
+        by appropriate defaults.
+    """
     return Job(
         job_id          = d["job_id"],
         title           = d.get("title", ""),
@@ -622,6 +753,11 @@ def _row_to_job(d: dict) -> Job:
 
 
 def get_jobs_count() -> int:
+    """Return the total number of job postings in the database.
+
+    Returns:
+        Integer count, or ``0`` on error.
+    """
     with get_conn() as conn:
         row = _run(conn, "SELECT COUNT(*) AS cnt FROM jobs").fetchone()
     if not row:
@@ -630,7 +766,13 @@ def get_jobs_count() -> int:
 
 
 def delete_expired_jobs() -> int:
-    """刪除截止日已過的職缺。整批 upsert 完成後呼叫一次。回傳刪除筆數。"""
+    """Delete job postings whose application deadline has passed.
+
+    Should be called once after a full ``upsert_jobs()`` batch completes.
+
+    Returns:
+        Number of rows deleted.
+    """
     from datetime import date
     today = date.today().isoformat()
     with get_conn() as conn:

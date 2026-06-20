@@ -1,14 +1,17 @@
-"""
-查詢服務（v3.2）：從 jobs 資料表搜尋符合訂閱條件的職缺。
+"""Job query pipeline: subscription → database search → formatted reply.
 
-流程：
-  1. 讀取訂閱條件
-  2. 搜尋 jobs 表（有效職缺 + 結構化條件篩選 + 多關鍵字模糊比對）
-  3. 格式化為行動版訊息回覆
+Flow:
+    1. Load the user's subscription from the database.
+    2. Call ``search_jobs()`` with all subscription filters applied.
+    3. Format the top-K results as a platform-appropriate chat message.
 
-回傳欄位：職稱、機關名稱、職系、職務列等、工作地點、有效期間、url
-  - LINE：純文字 URL
-  - Telegram：HTML 超連結（parse_mode='HTML'）
+Platform differences are handled only at the formatting layer:
+    - LINE: plain-text URLs.
+    - Telegram: HTML ``<a href>`` anchor tags (``parse_mode="HTML"``).
+
+The optional ``keyword`` argument in ``handle_user_query`` lets an
+ad-hoc keyword override the subscription's saved keywords for a single
+query — used when a user types free text instead of a command.
 """
 from app.db.database import get_subscription, search_jobs
 from app.models.job import Job
@@ -18,10 +21,21 @@ from app.utils.logger import logger
 
 
 def _format_period(deadline_start: str, deadline_end: str) -> str:
-    """
-    格式化有效期間。
-    '2026-05-30', '2026-09-30' → '2026-05-30 ~ 2026-09-30'
-    '', '2026-09-30'           → '截止 2026-09-30'
+    """Format an application period as a human-readable date string.
+
+    Args:
+        deadline_start: ISO start date, or ``""`` if not available.
+        deadline_end: ISO end date (deadline).
+
+    Returns:
+        ``"START ~ END"`` when both dates are present, ``"截止 END"``
+        when only the end date is available, or ``""`` if both are empty.
+
+    Example:
+        >>> _format_period("2026-05-30", "2026-09-30")
+        '2026-05-30 ~ 2026-09-30'
+        >>> _format_period("", "2026-09-30")
+        '截止 2026-09-30'
     """
     if deadline_start and deadline_end:
         return f"{deadline_start} ~ {deadline_end}"
@@ -31,14 +45,23 @@ def _format_period(deadline_start: str, deadline_end: str) -> str:
 
 
 def _format_job_block(idx: int, job: Job, platform: str = "line") -> str:
-    """
-    單筆職缺格式：
+    """Format a single job posting as a multi-line chat message block.
 
-    【1】職稱
-    🏛 機關名稱
-    🗂 職系｜📋 職務列等（X-Y職等）
-    📍 工作地點｜📅 有效期間
-    🔗 url（LINE 純文字 / Telegram HTML 超連結）
+    Layout::
+
+        【1】Job Title
+        🏛 Agency Name
+        🗂 Job Series ｜ 📋 Grade Range
+        📍 Location ｜ 📅 Deadline
+        🔗 URL  ← plain text for LINE, HTML anchor for Telegram
+
+    Args:
+        idx: 1-based display index shown in the header.
+        job: ``Job`` model instance to format.
+        platform: ``"line"`` (default) or ``"telegram"``.
+
+    Returns:
+        Multi-line string ready to send as a chat message.
     """
     lines = [f"【{idx}】{job.title}"]
 
@@ -79,13 +102,20 @@ def handle_user_query(
     platform_user_id: str,
     keyword: str = "",
 ) -> tuple[str, str]:
-    """
-    回傳 (message_text, parse_mode)。
-    LINE：parse_mode=''（純文字）
-    Telegram：parse_mode='HTML'
+    """Search jobs matching the user's subscription and return a formatted reply.
 
-    keyword：用戶即時輸入的關鍵字（非空時取代訂閱的 keywords 欄位）。
-    空字串（/results 指令）→ 使用訂閱中儲存的 keywords。
+    If ``keyword`` is provided it overrides the subscription's saved
+    keywords for this query only (ad-hoc search).  An empty ``keyword``
+    uses the subscription's stored keywords (triggered by ``/results``).
+
+    Args:
+        platform: ``"line"`` or ``"telegram"``.
+        platform_user_id: Platform-specific user identifier.
+        keyword: Ad-hoc keyword override; ``""`` uses subscription keywords.
+
+    Returns:
+        Tuple ``(message_text, parse_mode)`` where ``parse_mode`` is
+        ``"HTML"`` for Telegram and ``""`` for LINE.
     """
     sub = get_subscription(platform, platform_user_id)
     parse_mode = "HTML" if platform == "telegram" else ""
@@ -149,7 +179,17 @@ def handle_user_query(
 
 
 def _build_cond_summary(sub) -> str:
-    """建立訂閱條件摘要字串（用於「找不到職缺」訊息）。"""
+    """Build a human-readable summary of the active subscription filters.
+
+    Used in the "no results found" reply to show the user which filters
+    are currently applied.
+
+    Args:
+        sub: ``Subscription`` model instance.
+
+    Returns:
+        Newline-separated string of active filter conditions.
+    """
     lines = []
     lines.append(f"地點：{comma_to_jap(sub.work_place_names) or '不限'}")
     if sub.rank_types:

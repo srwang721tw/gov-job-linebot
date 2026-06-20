@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
-"""
-爬蟲入口（v3.3）：Render cron 排程 + 本機手動補跑。
+"""Crawler entry point for Render Cron Job and local manual runs.
 
-用法：
-  python scripts/run_crawl.py             # 直接連線（本機，台灣 IP）
-  python scripts/run_crawl.py --proxy     # 透過 proxy（Render 美國 IP 用）
-  MAX_CRAWL_PAGES_SCHEDULED=1 python scripts/run_crawl.py --proxy  # 只爬 1 頁
+Usage:
+    # Direct connection (local machine, Taiwan IP)
+    python scripts/run_crawl.py
+
+    # Via Taiwan proxy (Render US server)
+    python scripts/run_crawl.py --proxy
+
+    # Crawl only 1 page for a quick smoke test
+    MAX_CRAWL_PAGES_SCHEDULED=1 python scripts/run_crawl.py --proxy
+
+When ``--proxy`` is given, the script calls ``get_working_proxy()`` to
+select a validated Taiwan proxy from proxynova.com before crawling.
+Without ``--proxy``, a direct connection is used (appropriate when the
+machine has a Taiwan IP address).
 """
 import argparse
 import os

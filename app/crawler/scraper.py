@@ -1,14 +1,22 @@
-"""
-行政院人事行政總處事求人機關徵才系統 爬蟲（v3.1）
-目標：https://web3.dgpa.gov.tw/want03front/AP/WANTF00001.ASPX
-網站類型：ASP.NET WebForms，需攜帶 __VIEWSTATE 跨頁 POST（無 __EVENTVALIDATION）。
+"""Crawler for the Taiwan DGPA civil-service job board.
 
-v3.1 改動：
-  - 排程爬取固定 is_office=True（須具公務人員任用資格）
-  - 新增 _parse_rank_grades()、_derive_rank_type_codes()
-  - 日期統一為 YYYY-MM-DD（deadline_start + deadline_end）
-  - 新增 search_text 計算欄位
-  - 移除 person_kind、contact_method、apply_method
+Target: https://web3.dgpa.gov.tw/want03front/AP/WANTF00001.ASPX
+
+The site is built on ASP.NET WebForms.  Every page load embeds a large
+``__VIEWSTATE`` blob in a hidden ``<input>`` field; any subsequent POST
+(search, pagination) must carry that blob back unchanged.  There is no
+public REST API.
+
+Key design decisions:
+- ``_extract_hidden_fields`` captures VIEWSTATE after each response.
+- ``_search_payload`` builds the full ASP.NET POST body for first search
+  and for "next page" (``__EVENTTARGET = btnNEXT``).
+- Detail pages are fetched concurrently via ``ThreadPoolExecutor``
+  (``_DETAIL_WORKERS = 8``); the same ``requests.Session`` is reused
+  because urllib3's connection pool is thread-safe.
+- IPv4 is forced globally to avoid ``errno 101 Network unreachable`` on
+  cloud hosts (Render, etc.) that default to IPv6 but DGPA only listens
+  on IPv4.
 """
 import re
 import socket
@@ -63,7 +71,20 @@ _RETRY = Retry(
 
 
 def _new_session(proxy_dict: dict | None = None) -> requests.Session:
-    """建立帶重試策略的 requests Session（強制 IPv4）。"""
+    """Create a requests Session with retry strategy and optional proxy.
+
+    Mounts an ``HTTPAdapter`` with exponential-backoff retry (3 attempts,
+    backoff factor 2, on status codes 429/500/502/503/504) on both
+    ``https://`` and ``http://``.
+
+    Args:
+        proxy_dict: Optional proxy mapping accepted by ``requests``, e.g.
+            ``{"http": "http://1.2.3.4:8080", "https": "http://1.2.3.4:8080"}``.
+            Defaults to ``None`` (direct connection).
+
+    Returns:
+        Configured ``requests.Session`` instance.
+    """
     s = requests.Session()
     adapter = HTTPAdapter(max_retries=_RETRY)
     s.mount("https://", adapter)
@@ -76,21 +97,41 @@ def _new_session(proxy_dict: dict | None = None) -> requests.Session:
 # ── 日期工具 ──────────────────────────────────────────────────────────────────
 
 def _roc_today() -> str:
-    """回傳今日民國年日期，格式 YYYMMDD（例：1150526）。"""
+    """Return today's date in ROC (民國) calendar as ``YYYMMDD``.
+
+    Returns:
+        Date string, e.g. ``"1150526"`` for 2026-05-26.
+    """
     today = datetime.now(timezone(timedelta(hours=8)))
     return f"{today.year - 1911}{today.month:02d}{today.day:02d}"
 
 
 def _roc_days_ago(days: int) -> str:
+    """Return the ROC calendar date ``days`` before today as ``YYYMMDD``.
+
+    Args:
+        days: Number of days to subtract from today (Taiwan UTC+8).
+
+    Returns:
+        ROC date string in ``YYYMMDD`` format.
+    """
     d = datetime.now(timezone(timedelta(hours=8))) - timedelta(days=days)
     return f"{d.year - 1911}{d.month:02d}{d.day:02d}"
 
 
 def _roc_to_iso(roc: str) -> str:
-    """
-    將單一民國年日期字串轉為 ISO YYYY-MM-DD。
-    '115/06/03' → '2026-06-03'
-    若格式不符則回傳 ''。
+    """Convert a single ROC calendar date string to ISO 8601.
+
+    Args:
+        roc: Date string in ROC format, e.g. ``"115/06/03"``.
+
+    Returns:
+        ISO date string ``"YYYY-MM-DD"``, or ``""`` if the input cannot
+        be parsed.
+
+    Example:
+        >>> _roc_to_iso("115/06/03")
+        '2026-06-03'
     """
     s = roc.strip().replace(" ", "")
     parts = s.split("/")
@@ -104,10 +145,21 @@ def _roc_to_iso(roc: str) -> str:
 
 
 def _parse_deadline_range(deadline_raw: str) -> tuple[str, str]:
-    """
-    解析列表頁截止日範圍字串，回傳 (deadline_start, deadline_end) ISO 格式。
-    '115/05/30~115/06/03' → ('2026-05-30', '2026-06-03')
-    '115/06/03' → ('', '2026-06-03')
+    """Parse a tilde-delimited ROC date range into an ISO tuple.
+
+    Args:
+        deadline_raw: Raw deadline string from the list page, e.g.
+            ``"115/05/30~115/06/03"`` or a single date ``"115/06/03"``.
+
+    Returns:
+        Tuple ``(deadline_start, deadline_end)`` in ISO ``"YYYY-MM-DD"``
+        format.  ``deadline_start`` is ``""`` when no start date is given.
+
+    Example:
+        >>> _parse_deadline_range("115/05/30~115/06/03")
+        ('2026-05-30', '2026-06-03')
+        >>> _parse_deadline_range("115/06/03")
+        ('', '2026-06-03')
     """
     s = deadline_raw.strip()
     if "~" in s:
@@ -119,14 +171,25 @@ def _parse_deadline_range(deadline_raw: str) -> tuple[str, str]:
 # ── Rank 解析工具 ──────────────────────────────────────────────────────────────
 
 def _parse_rank_grades(rank_text: str) -> tuple[int, int]:
-    """
-    從官等文字提取最低/最高職等。
-    '薦任第6至第9職等'               → (6, 9)
-    '委任第5職等或薦任第6職等至薦任第7職等' → (5, 7)
-    '簡任第10職等'                    → (10, 10)
-    '不分官等' / '' / 無法解析         → (0, 0)
+    """Extract the lowest and highest grade numbers from a rank string.
 
-    使用 regex 同時匹配「第N職等」與「第N至」兩種格式。
+    Uses a regex that matches both ``第N職等`` and ``第N至`` patterns.
+
+    Args:
+        rank_text: Raw rank description from the DGPA site, e.g.
+            ``"薦任第6至第9職等"``.
+
+    Returns:
+        Tuple ``(min_grade, max_grade)`` as integers.  Returns ``(0, 0)``
+        for ungraded positions (``不分官等``) or unparseable text.
+
+    Example:
+        >>> _parse_rank_grades("薦任第6至第9職等")
+        (6, 9)
+        >>> _parse_rank_grades("簡任第10職等")
+        (10, 10)
+        >>> _parse_rank_grades("不分官等")
+        (0, 0)
     """
     nums = [int(n) for n in re.findall(r"第(\d+)(?:職等|至|～|~)", rank_text)]
     if not nums:
@@ -135,12 +198,26 @@ def _parse_rank_grades(rank_text: str) -> tuple[int, int]:
 
 
 def _derive_rank_type_codes(rank_text: str) -> str:
-    """
-    從官等文字推算代碼（逗號分隔）。
-    代碼：1=簡任/簡派, 2=薦任/薦派, 3=委任/委派, 4=其他（無法識別）
-    '薦任第6職等'            → '2'
-    '委任第5職等或薦任第6職等' → '3,2'
-    '不分官等'               → '4'
+    """Map a rank description to comma-separated rank-type codes.
+
+    Code mapping: ``1`` = 簡任/簡派, ``2`` = 薦任/薦派,
+    ``3`` = 委任/委派, ``4`` = other (non-empty but unrecognised).
+
+    Args:
+        rank_text: Raw rank description string.
+
+    Returns:
+        Comma-separated code string, e.g. ``"3,2"`` for a position that
+        spans both 委任 and 薦任 grades.  Empty string if ``rank_text``
+        is blank.
+
+    Example:
+        >>> _derive_rank_type_codes("薦任第6職等")
+        '2'
+        >>> _derive_rank_type_codes("委任第5職等或薦任第6職等")
+        '3,2'
+        >>> _derive_rank_type_codes("不分官等")
+        '4'
     """
     codes: list[str] = []
     if "簡任" in rank_text or "簡派" in rank_text:
@@ -157,7 +234,20 @@ def _derive_rank_type_codes(rank_text: str) -> str:
 # ── ASP.NET Form 工具 ─────────────────────────────────────────────────────────
 
 def _extract_hidden_fields(soup: BeautifulSoup) -> dict:
-    """蒐集頁面中所有 ASP.NET 隱藏欄位（VIEWSTATE 等）。"""
+    """Collect all ASP.NET hidden input fields from a parsed page.
+
+    Must be called after every response so that the ``__VIEWSTATE`` (and
+    related session tokens) from that response are carried into the next
+    POST.  Passing a stale VIEWSTATE causes ASP.NET to discard the
+    request silently.
+
+    Args:
+        soup: Parsed HTML page as a ``BeautifulSoup`` object.
+
+    Returns:
+        Dict mapping ``input[name]`` → ``input[value]`` for every
+        ``<input type="hidden">`` element on the page.
+    """
     fields = {}
     for inp in soup.find_all("input", type="hidden"):
         name = inp.get("name")
@@ -180,7 +270,32 @@ def _search_payload(
     org_keyword: str = "",
     event_target: str = "",
 ) -> dict:
-    """建立查詢或分頁 POST 的 payload。"""
+    """Build the ASP.NET WebForms POST body for a search or pagination request.
+
+    Merges the current page's hidden fields with the search criteria.
+    For pagination, set ``event_target`` to the "next page" button's
+    control ID (``ctl00$ContentPlaceHolder1$btnNEXT``); the submit
+    button parameter is then omitted automatically.
+
+    Args:
+        hidden: Hidden-field dict from ``_extract_hidden_fields``.
+        date_from: ROC start date in ``YYYMMDD`` format.
+        date_to: ROC end date in ``YYYMMDD`` format.
+        work_place: ``drpWORK_PLACE`` value (empty = all locations).
+        person_kind: ``drpPERSON_KIND`` value (empty = all categories).
+        sysnam_grp: ``drpSYSNAM_grp`` value: ``""`` / ``"A"`` / ``"B"``.
+        sysnam: ``drpSYSNAM`` value (empty = all job series).
+        chk_types: List of rank-type checkbox values to enable, e.g.
+            ``["1", "2"]`` for 簡任 + 薦任.
+        is_office: ``True`` = requires civil-service qualification;
+            ``False`` = does not require; ``None`` = no filter.
+        title_keyword: Job-title keyword sent to the site filter.
+        org_keyword: Agency-name keyword sent to the site filter.
+        event_target: ``__EVENTTARGET`` value; empty for first search.
+
+    Returns:
+        Complete POST payload dict ready to pass to ``session.post``.
+    """
     payload: dict = {
         **hidden,
         "__EVENTTARGET":   event_target,
@@ -221,7 +336,20 @@ def _text(tag) -> str:
 
 
 def _parse_list_page(soup: BeautifulSoup) -> List[dict]:
-    """從 GridView 解析職缺摘要列，回傳 raw dict list。"""
+    """Parse the DGPA GridView table and return a list of raw job dicts.
+
+    Each ``<tr>`` with a ``cursor_point`` div contains one job.  Field
+    order in the ``md_hide`` divs (desktop-hidden columns) is fixed:
+    index 0 = job series, 1 = rank/grade, 2 = location, 3 = deadline.
+
+    Args:
+        soup: Parsed HTML of the list page.
+
+    Returns:
+        List of dicts with keys: ``job_id``, ``title``, ``org_name``,
+        ``location``, ``job_series``, ``rank_type``, ``deadline``,
+        ``job_url``.  Returns an empty list if the grid is not found.
+    """
     table = soup.find("table", id="ctl00_ContentPlaceHolder1_gvMAIN")
     if not table:
         return []
@@ -272,6 +400,15 @@ def _parse_list_page(soup: BeautifulSoup) -> List[dict]:
 
 
 def _has_next_page(soup: BeautifulSoup) -> bool:
+    """Detect whether a "next page" pagination link exists on the current page.
+
+    Args:
+        soup: Parsed HTML of the current list page.
+
+    Returns:
+        ``True`` if a ``doPostBack`` link targeting ``btnNEXT`` or
+        labelled ``"下一頁"`` is found, ``False`` otherwise.
+    """
     for a in soup.find_all("a", href=re.compile(r"doPostBack")):
         if "btnNEXT" in a.get("href", "") or "下一頁" in a.get_text():
             return True
@@ -281,22 +418,33 @@ def _has_next_page(soup: BeautifulSoup) -> bool:
 # ── 詳細頁解析 ────────────────────────────────────────────────────────────────
 
 def fetch_job_detail(session: requests.Session | None, url: str) -> dict:
-    """session 為 None 時自動建立新 Session。"""
+    """Fetch and parse a single DGPA job detail page.
+
+    Safe to call from multiple threads; if ``session`` is ``None`` a new
+    session is created for that call.
+
+    Verified element IDs (2026-05):
+        - ``PLTITLE``          — job title
+        - ``PLORG_NAME``       — agency name
+        - ``PLWORK_PLACE_TYPE`` — location (with numeric code prefix)
+        - ``PLRANK``           — rank / grade description
+        - ``PLSYSNAM``         — job series name
+        - ``PLDATE_FROM_TO``   — date range (ROC format ``YYY/MM/DD~YYY/MM/DD``)
+        - ``PLWORK_ITEM``      — work description
+        - ``PLWORK_QUALITY``   — qualifications
+        - ``PLWORK_ADDRESS``   — work address
+
+    Args:
+        session: Existing ``requests.Session`` (preferred for connection
+            reuse); ``None`` creates a new session automatically.
+        url: Full URL of the job detail page.
+
+    Returns:
+        Dict with keys matching the element IDs above, plus
+        ``"date_range"``.  Returns an empty dict on any error.
+    """
     if session is None:
         session = _new_session()
-    """
-    抓取職缺詳細頁並解析關鍵欄位。
-    已驗證的 element ID（2026-05）：
-        PLTITLE          職稱
-        PLORG_NAME       機關名稱
-        PLWORK_PLACE_TYPE 工作地點（帶代碼前綴）
-        PLRANK           官等
-        PLSYSNAM         職系
-        PLDATE_FROM_TO   徵才期間（格式：起始日~截止日，民國年）
-        PLWORK_ITEM      工作說明
-        PLWORK_QUALITY   應徵條件
-        PLWORK_ADDRESS   工作地址
-    """
     if not url:
         return {}
     try:
@@ -330,21 +478,47 @@ def fetch_job_detail(session: requests.Session | None, url: str) -> dict:
 # ── 原始資料 → Job 物件轉換 ──────────────────────────────────────────────────
 
 def _extract_work_place_code(location: str) -> str:
-    """'42-臺中市' → '42'"""
+    """Extract the numeric location code from a prefixed location string.
+
+    Args:
+        location: Location string with code prefix, e.g. ``"42-臺中市"``.
+
+    Returns:
+        Numeric code string (e.g. ``"42"``), or ``""`` if not found.
+    """
     m = re.match(r"^(\d+)-", location.strip())
     return m.group(1) if m else ""
 
 
 def _clean_location(location: str) -> str:
-    """'42-臺中市' → '臺中市'"""
+    """Strip the numeric code prefix from a location string.
+
+    Args:
+        location: Location string, e.g. ``"42-臺中市"``.
+
+    Returns:
+        Location name without prefix (e.g. ``"臺中市"``), or the
+        original string if no prefix is found.
+    """
     m = re.match(r"^\d+-(.+)$", location.strip())
     return m.group(1) if m else location.strip()
 
 
 def _build_job(raw: dict, detail: dict | None = None) -> Job:
-    """
-    從列表頁原始 dict + 詳細頁 dict 建立 Job 物件。
-    detail 優先覆蓋列表頁的同名欄位。
+    """Construct a Job object by merging list-page and detail-page data.
+
+    Detail-page values take precedence over list-page values for shared
+    fields (title, org_name, location, rank_type, job_series).  The
+    ``search_text`` field is computed as the concatenation of title,
+    org_name, qualifications, and work_items for full-text indexing.
+
+    Args:
+        raw: Dict from ``_parse_list_page`` (always present).
+        detail: Dict from ``fetch_job_detail`` (``None`` if detail pages
+            were not fetched).
+
+    Returns:
+        Populated ``Job`` Pydantic model instance.
     """
     d = detail or {}
 
@@ -419,7 +593,7 @@ def crawl_jobs(
     sysnam_grp: str = "",
     sysnam: str = "",
     chk_types: list[str] | None = None,
-    is_office: bool | None = True,   # v3.1: 預設固定 True（須具公務人員資格）
+    is_office: bool | None = True,
     title_keyword: str = "",
     org_keyword: str = "",
     lookback_days: int = 30,
@@ -427,21 +601,42 @@ def crawl_jobs(
     fetch_detail: bool = False,
     proxy_dict: dict | None = None,
 ) -> List[Job]:
-    """
-    依條件爬取職缺。
+    """Crawl DGPA job postings with optional filtering and detail fetching.
+
+    Workflow:
+        1. GET the list page to obtain the initial ``__VIEWSTATE``.
+        2. POST the first search request with all filter parameters.
+        3. Parse the GridView; repeat with ``btnNEXT`` until no more
+           pages or ``max_pages`` is reached (0.5 s sleep between pages).
+        4. If ``fetch_detail`` is True, fetch all detail pages concurrently
+           via ``ThreadPoolExecutor`` (``_DETAIL_WORKERS = 8`` threads).
+        5. Build and return ``Job`` objects by merging list + detail data.
 
     Args:
-        work_place:    drpWORK_PLACE 值（空字串 = 全部地點）
-        person_kind:   drpPERSON_KIND 值（空字串 = 全部類別）
-        sysnam_grp:    drpSYSNAM_grp 值：'' / 'A'（行政類）/ 'B'（技術類）
-        sysnam:        drpSYSNAM 值（空字串 = 全部職系）
-        chk_types:     官等 checkbox 清單，e.g. ['1','2'] = 簡任+薦任
-        is_office:     True=須具資格（預設）/ False=不具資格 / None=不限
-        title_keyword: 職缺名稱關鍵字（只用於爬蟲 filter，不用於 DB 搜尋）
-        org_keyword:   機關名稱關鍵字（只用於爬蟲 filter）
-        lookback_days: 查詢幾天內的職缺（預設 30 天）
-        max_pages:     最多爬幾頁（0 = 不限）
-        fetch_detail:  是否同時抓取詳細頁（排程爬取時用）
+        work_place: ``drpWORK_PLACE`` dropdown value (empty = all locations).
+        person_kind: ``drpPERSON_KIND`` dropdown value (empty = all).
+        sysnam_grp: Job-series group: ``""`` (all), ``"A"`` (行政), ``"B"`` (技術).
+        sysnam: Specific job-series code (empty = all within the group).
+        chk_types: Rank-type checkbox values to enable, e.g. ``["1", "2"]``
+            for 簡任 + 薦任.
+        is_office: ``True`` = requires civil-service qualification (default);
+            ``False`` = does not require; ``None`` = no filter.
+        title_keyword: Job-title keyword passed to the site's own search
+            (not used for DB keyword matching).
+        org_keyword: Agency-name keyword passed to the site's search.
+        lookback_days: How many days back to query (default 30).
+        max_pages: Maximum list pages to fetch (default ``MAX_CRAWL_PAGES``
+            from env; ``0`` = unlimited).
+        fetch_detail: Whether to fetch individual detail pages for full
+            field data (qualifications, work_items, etc.). Defaults to
+            ``False``.
+        proxy_dict: Optional proxy dict for the requests session, e.g.
+            ``{"http": "http://1.2.3.4:8080", "https": "..."}``.
+            Defaults to ``None`` (direct connection).
+
+    Returns:
+        List of ``Job`` objects.  May be empty if the site returns no
+        results or all pages fail to parse.
     """
     session   = _new_session(proxy_dict)
     date_to   = _roc_today()

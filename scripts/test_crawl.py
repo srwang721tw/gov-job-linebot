@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""
-爬蟲完整測試腳本（v3.1）
-驗證：
-  1. 列表頁解析（職稱、機關、地點、截止日、連結）
-  2. rank_grade_min/max、rank_type_codes 計算
-  3. 詳細頁抓取（工作說明、應徵條件等）
-  4. deadline_start/end（YYYY-MM-DD）
-  5. search_text 計算欄位
+"""Crawler smoke-test script — validates scraping logic without writing to the DB.
 
-用法：
+Runs four validation phases:
+    1. List-page parsing: title, agency, location, rank, deadline, URL.
+    2. Rank-field derivation: ``rank_grade_min/max``, ``rank_type_codes``.
+    3. Detail-page fetching: work_items, qualifications, work_address.
+    4. Full ``Job`` object construction including ``search_text``.
+
+Usage:
     python scripts/test_crawl.py
-    MAX_CRAWL_PAGES=1 python scripts/test_crawl.py
+    MAX_CRAWL_PAGES=1 python scripts/test_crawl.py   # faster 1-page run
 """
 import sys
 import os

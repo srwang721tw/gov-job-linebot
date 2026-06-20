@@ -1,16 +1,19 @@
-"""
-LINE Messaging API v3.1 webhook 處理。
+"""LINE Messaging API webhook handler (LINE Bot SDK v3).
 
-訂閱設定流程（7 步驟）：
-  1. 工作地點（文字輸入，逗號分隔縣市名稱，Quick Reply 有「不限地區」快捷鍵）
-  2. 官等類別（Quick Reply 逐一累加，點「✅確定」結束）
-  3. 職系大分類（Quick Reply 單選：不限/行政類/技術類）
-  4. 職系細項（文字輸入，可略過）
-  5. 職務列等區間（文字輸入 "最低-最高" 或單一職等，可略過）
-  6. 關鍵字（文字輸入，逗號分隔，可略過）
-  7. 完成確認
+Implements a 6-step guided subscription setup flow using Quick Reply
+buttons, and handles all incoming user messages via a module-level
+per-user state machine (``_conv`` dict).
 
-查詢觸發：任何文字訊息（非設定指令）→ handle_user_query → 回覆純文字
+Subscription steps:
+    1. Work location (paginated Quick Reply multi-select, 9 items/page)
+    2. Rank category (Quick Reply multi-select; accumulated until confirmed)
+    3. Job series group (Quick Reply single-select)
+    4. Job series names (paginated Quick Reply multi-select; skippable)
+    5. Grade range (free-text input, e.g. ``5-9``; skippable)
+    6. Keywords (free-text, comma-separated; skippable)
+
+Any non-command message triggers ``handle_user_query`` as a keyword
+search against the user's stored subscription.
 """
 import re
 

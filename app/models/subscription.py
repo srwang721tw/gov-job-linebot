@@ -1,32 +1,62 @@
-"""
-使用者訂閱條件模型（v3.1）。
-同時支援 LINE 和 Telegram（以 platform + platform_user_id 識別）。
+"""Pydantic model representing a user's job-alert subscription.
 
-work_place_codes / rank_types / sysnam_names 均為逗號分隔字串，空字串表示不限。
-rank_grade_min / rank_grade_max = 0 表示不限職等。
+A subscription is identified by the composite key
+``(platform, platform_user_id)``.  Multi-select fields are stored as
+comma-separated strings; an empty string means "no filter" (all values
+match).  Grade fields use ``0`` to represent "no filter".
 """
 from pydantic import BaseModel
 
 
 class Subscription(BaseModel):
-    platform: str                    # 'line' | 'telegram'
-    platform_user_id: str            # LINE: 'U...' | Telegram: str(int)
+    """A user's saved job-search subscription across LINE or Telegram.
 
-    # ── 工作地點（可多選）────────────────────────────────────────────────────────
-    work_place_codes: str = ""       # 逗號分隔代碼，如 "10,42"（空=不限）
-    work_place_names: str = ""       # 逗號分隔名稱，如 "臺北市,臺中市"
+    Fields are grouped by subscription step:
 
-    # ── 官等類別（可多選）────────────────────────────────────────────────────────
-    rank_types: str = ""             # 逗號分隔代碼，如 "2,3"（1=簡任,2=薦任,3=委任,4=其他，空=不限）
+    - **Identity**: platform + user ID pair.
+    - **Location** (step 1): multi-select work locations.
+    - **Rank** (steps 2–3): rank category codes and grade range.
+    - **Job series** (steps 4–5): series group and specific series names.
+    - **Keywords** (step 6): free-text matching terms.
+    """
 
-    # ── 職務列等區間 ─────────────────────────────────────────────────────────────
-    rank_grade_min: int = 0          # 最低職等（0=不限）
-    rank_grade_max: int = 0          # 最高職等（0=不限）
+    # Identity
+    platform: str
+    """Platform identifier: ``"line"`` or ``"telegram"``."""
+    platform_user_id: str
+    """Platform-specific user ID (LINE ``U...`` string or Telegram integer
+    cast to string)."""
 
-    # ── 職系 ─────────────────────────────────────────────────────────────────────
-    sysnam_grp: str = ""             # 職系大分類：'' / 'A'（行政）/ 'B'（技術）
-    sysnam_grp_name: str = ""        # 職系大分類名稱：'不限' / '行政類' / '技術類'
-    sysnam_names: str = ""           # 逗號分隔職系名稱，如 "綜合行政,社會行政"（空=不限）
+    # Work location (step 1, multi-select)
+    work_place_codes: str = ""
+    """Comma-separated DGPA location codes, e.g. ``"10,42"``.
+    Empty string = all locations."""
+    work_place_names: str = ""
+    """Comma-separated human-readable location names, e.g. ``"臺北市,臺中市"``."""
 
-    # ── 關鍵字（逗號/空格分隔，不傳給爬蟲）─────────────────────────────────────
-    keywords: str = ""               # 比對職稱、機關名稱、資格條件、工作項目
+    # Rank category (step 2, multi-select)
+    rank_types: str = ""
+    """Comma-separated rank-type codes, e.g. ``"2,3"``
+    (``1``=簡任, ``2``=薦任, ``3``=委任, ``4``=其他).
+    Empty string = all rank types."""
+
+    # Grade range (step 3)
+    rank_grade_min: int = 0
+    """Minimum desired grade (``0`` = no lower bound)."""
+    rank_grade_max: int = 0
+    """Maximum desired grade (``0`` = no upper bound)."""
+
+    # Job series (steps 4–5)
+    sysnam_grp: str = ""
+    """Series group code: ``""`` (all), ``"A"`` (行政類), ``"B"`` (技術類)."""
+    sysnam_grp_name: str = ""
+    """Human-readable series group: ``"不限"``, ``"行政類"``, or ``"技術類"``."""
+    sysnam_names: str = ""
+    """Comma-separated job-series names, e.g. ``"綜合行政,社會行政"``.
+    Empty string = all series within the group."""
+
+    # Keywords (step 6)
+    keywords: str = ""
+    """Comma- or space-separated search keywords.  Matched against
+    ``title``, ``org_name``, ``qualifications``, and ``work_items`` via
+    ``pg_trgm`` similarity (PostgreSQL) or ``LIKE`` (SQLite)."""

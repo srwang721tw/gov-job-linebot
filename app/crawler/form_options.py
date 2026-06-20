@@ -1,13 +1,13 @@
-"""
-從 DGPA 職缺網站抓取並快取下拉選單選項。
-供訂閱設定的 Quick Reply / InlineKeyboard 使用。
+"""DGPA form-option cache for subscription setup widgets.
 
-快取：工作地點、人員區分、職系（sysnam）
+Provides work-location and job-series (sysnam) dropdown options used by
+the LINE Quick Reply and Telegram InlineKeyboard subscription flows.
 
-v3.1 改動：
-  - 加入硬編碼靜態資料作為 fallback（Render 無法連到 DGPA 時仍可正常訂閱）
-  - 加入 IPv4 強制 + HTTPAdapter retry
-  - 失敗時不快取，確保下次呼叫重試
+The cache (``_cached``) is **pre-populated at import time** with a
+2026-06 static snapshot so that the Render web service (which cannot
+reach the Taiwan-only DGPA site) works out of the box.  Call
+``clear_cache()`` followed by ``get_form_options()`` on a machine with
+Taiwan IP access to refresh from the live site.
 """
 import socket
 
@@ -32,6 +32,11 @@ _RETRY = Retry(
 
 
 def _new_session() -> requests.Session:
+    """Create a lightweight requests Session for fetching form options.
+
+    Returns:
+        Session with a 2-retry HTTPAdapter and IPv4 enforcement.
+    """
     s = requests.Session()
     adapter = HTTPAdapter(max_retries=_RETRY)
     s.mount("https://", adapter)
@@ -166,27 +171,42 @@ _cached = _STATIC_OPTIONS
 # ── 選單選項取得 ──────────────────────────────────────────────────────────────
 
 def _extract_options(soup: BeautifulSoup, select_id: str) -> list[dict]:
+    """Extract ``<option>`` elements from a ``<select>`` by its HTML id.
+
+    Args:
+        soup: Parsed page as a ``BeautifulSoup`` object.
+        select_id: The ``id`` attribute of the target ``<select>`` element.
+
+    Returns:
+        List of dicts ``{"value": ..., "text": ...}`` for every option
+        that has a non-empty ``value`` attribute.  Empty list if the
+        ``<select>`` element is not found.
+    """
     tag = soup.find("select", id=select_id)
     if not tag:
         return []
     return [
         {"value": opt.get("value", ""), "text": opt.get_text(strip=True)}
         for opt in tag.find_all("option")
-        if opt.get("value", "")  # 略過空白 placeholder
+        if opt.get("value", "")
     ]
 
 
 def get_form_options() -> dict:
-    """
-    回傳選單選項字典：
-      {
-        "work_place":  [{value, text}, ...],   # 工作地點
-        "person_kind": [{value, text}, ...],   # 人員區分（已棄用，回傳空列表）
-        "sysnam":      [{value, text}, ...],   # 職系細項
-      }
+    """Return dropdown option lists for work location and job series.
 
-    優先從 DGPA 網站動態取得（並快取），
-    失敗時自動 fallback 到本機硬編碼靜態資料（2026-06 版本）。
+    Lookup order:
+        1. Module-level cache (``_cached``): returned immediately if set.
+        2. Live DGPA site: parsed and cached on success.
+        3. Static fallback (``_STATIC_OPTIONS``, 2026-06 snapshot): used
+           when the live site is unreachable (e.g. from Render US servers).
+
+    Returns:
+        Dict with keys:
+
+        - ``"work_place"``: list of ``{"value": code, "text": name}``
+        - ``"person_kind"``: always ``[]`` (field removed from subscription)
+        - ``"sysnam"``: list of ``{"value": code, "text": name}``
     """
     global _cached
     if _cached is not None:
@@ -226,12 +246,21 @@ def get_form_options() -> dict:
 
 
 def get_sysnam_names_for_grp(grp: str) -> list[str]:
-    """
-    取得指定職系大分類下的所有職系名稱清單，供 DB search_jobs 的 IN 子句使用。
+    """Return all job-series names belonging to a series group.
 
-    grp='A' → ['綜合行政', '社勞行政', '人事行政', ...]
-    grp='B' → ['電機工程', '土木工程', ...]
-    grp=''  → [] (不過濾)
+    Used to build the ``job_series IN (...)`` clause in ``search_jobs``.
+
+    Args:
+        grp: Group code: ``"A"`` (行政類), ``"B"`` (技術類), or ``""``
+            (no filter).
+
+    Returns:
+        List of series name strings for the given group, or an empty
+        list when ``grp`` is ``""``.
+
+    Example:
+        >>> get_sysnam_names_for_grp("A")
+        ['綜合行政', '社勞行政', '人事行政', ...]
     """
     if not grp:
         return []
@@ -240,9 +269,16 @@ def get_sysnam_names_for_grp(grp: str) -> list[str]:
 
 
 def text_to_code(category: str, text: str) -> str:
-    """
-    依顯示文字反查代碼。
-    text_to_code('sysnam', '綜合行政') → 'A101'
+    """Look up an option code by its display text.
+
+    Args:
+        category: Key in the options dict, e.g. ``"sysnam"`` or
+            ``"work_place"``.
+        text: Display text to look up, e.g. ``"綜合行政"``.
+
+    Returns:
+        Corresponding option value string (e.g. ``"A101"``), or ``""``
+        if not found.
     """
     for opt in get_form_options().get(category, []):
         if opt["text"] == text:
@@ -251,8 +287,21 @@ def text_to_code(category: str, text: str) -> str:
 
 
 def code_to_sysnam_grp(sysnam_code: str) -> str:
-    """
-    職系代碼 → 大分類：'A101' → 'A', 'B102' → 'B', '0100' → ''
+    """Derive the series-group letter from a sysnam option code.
+
+    Args:
+        sysnam_code: Option value from the ``sysnam`` dropdown, e.g.
+            ``"A101"``.
+
+    Returns:
+        Uppercase group letter (``"A"`` or ``"B"``), or ``""`` if the
+        code starts with a digit or is empty.
+
+    Example:
+        >>> code_to_sysnam_grp("A101")
+        'A'
+        >>> code_to_sysnam_grp("0100")
+        ''
     """
     if sysnam_code and sysnam_code[0].isalpha():
         return sysnam_code[0].upper()
@@ -260,6 +309,11 @@ def code_to_sysnam_grp(sysnam_code: str) -> str:
 
 
 def clear_cache() -> None:
-    """強制在下次呼叫時重新抓取（例如網站更新後）。"""
+    """Invalidate the option cache so the next call re-fetches from DGPA.
+
+    Useful for local development after the DGPA site updates its dropdown
+    contents.  Has no effect on deployments that cannot reach DGPA
+    (Render servers), which will fall back to the static snapshot.
+    """
     global _cached
     _cached = None

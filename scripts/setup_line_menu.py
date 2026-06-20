@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""
-一次性設定 LINE Rich Menu（下方固定選單）。
-在本機執行一次即可：
+"""One-time script to create and activate the LINE Rich Menu.
 
+Generates a 2500 × 843 pixel PNG using Pillow (deep-navy background,
+5 blue buttons) and uploads it to the LINE API, then sets it as the
+default Rich Menu for all users.
+
+Prerequisites:
+    pip install Pillow requests python-dotenv
+    # LINE_CHANNEL_ACCESS_TOKEN must be set in .env or the environment
+
+Run once from a local machine:
     python scripts/setup_line_menu.py
-
-前置條件：
-- pip install Pillow requests python-dotenv
-- .env 檔案含 LINE_CHANNEL_ACCESS_TOKEN，或事先 export 環境變數
 """
 import io
 import os

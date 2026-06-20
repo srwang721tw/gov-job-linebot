@@ -1,30 +1,33 @@
-"""
-Telegram Bot 服務（v3.2）。
-與 LINE bot 共用 query_service、database、form_options 層。
+"""Telegram Bot webhook handler (python-telegram-bot v20).
 
-訂閱設定流程（7 步驟，InlineKeyboard）：
-  1. 工作地點（多選 + 確定）
-  2. 官等類別（多選 + 確定）
-  3. 職系大分類（單選）
-  4. 職系細項（多選 + 確定，大分類=不限則略過）
-  5. 職務列等區間（文字輸入）
-  6. 關鍵字（文字輸入）
-  7. 確認摘要
+Shares ``query_service``, ``database``, and ``form_options`` with the
+LINE service; only the UI layer differs.
 
-callback_data 前綴：
-  LC:CODE   選擇地點（CODE=_ 表空值）
-  LP:N      地點翻頁
-  LC:ALL    不限地區（清除所有選擇並前往下一步）
-  LC:CONFIRM 地點確認
-  RC:CODE   選擇官等（1~4）
-  RC:ALL    不限官等
-  RC:CONFIRM 官等確認
-  SC:GRP    選擇職系大分類
-  NC:IDX    選擇職系細項（index in options list）
-  NP:N      職系細項翻頁
-  NC:ALL    不限細項
-  NC:CONFIRM 職系細項確認
-  SKIP      略過（職務列等/關鍵字）
+Implements the same 6-step subscription flow using async handlers and
+InlineKeyboard buttons with ✅ / ☐ toggle multi-select UX.
+
+Subscription steps:
+    1. Work location (paginated InlineKeyboard multi-select)
+    2. Rank category (InlineKeyboard multi-select)
+    3. Job series group (InlineKeyboard single-select)
+    4. Job series names (paginated InlineKeyboard multi-select; skippable)
+    5. Grade range (free-text; skippable via inline button)
+    6. Keywords (free-text; skippable via inline button)
+
+``callback_data`` prefix conventions:
+    - ``LC:CODE``    — toggle a location selection (``_`` = empty value)
+    - ``LP:N``       — paginate location list
+    - ``LC:ALL``     — select "no location filter"
+    - ``LC:CONFIRM`` — confirm location selection
+    - ``RC:CODE``    — toggle a rank-type code (``1``–``4``)
+    - ``RC:ALL``     — select "all rank types"
+    - ``RC:CONFIRM`` — confirm rank-type selection
+    - ``SC:GRP``     — select a series group (``""``, ``"A"``, ``"B"``)
+    - ``NC:IDX``     — toggle a job-series name by list index
+    - ``NP:N``       — paginate job-series list
+    - ``NC:ALL``     — select "all series"
+    - ``NC:CONFIRM`` — confirm series selection
+    - ``SKIP``       — skip the current optional step
 """
 import asyncio
 import re

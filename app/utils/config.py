@@ -1,3 +1,9 @@
+"""Application configuration loaded from environment variables.
+
+When ``DATABASE_URL`` is set the app connects to Neon PostgreSQL;
+otherwise it falls back to a local SQLite file at ``SQLITE_PATH``.
+All other settings have sensible defaults for local development.
+"""
 import os
 from pathlib import Path
 from dotenv import load_dotenv

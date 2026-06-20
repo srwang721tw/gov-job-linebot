@@ -95,6 +95,12 @@ FastAPI (Render)
 2. 工作地點（多選）→ 官等類別（多選）→ 職系大分類 → 職系細項（可略過）→ 職務列等區間（可略過）→ 關鍵字（可略過）
 3. 儲存至 `subscription` 表（platform + platform_user_id 為複合唯一鍵）
 
+## 程式碼文件規範
+
+所有 Python 模組（`app/` + `scripts/`）使用 **英文 Google-style docstrings**：
+- 模組層級：module purpose + design notes
+- 函式層級：one-liner summary, Args, Returns, Raises, Example（視需要）
+
 ## 關鍵實作細節
 
 **Proxy 管理（`app/crawler/proxy_manager.py`）：** DGPA 僅允許台灣 IP，Render 美國 IP 需透過 proxy。
