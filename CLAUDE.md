@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 專案說明（v3.3）
 
 LINE + Telegram 聊天機器人，讓使用者設定工作地點（多選）、官等類別（多選）、職系、職務列等區間、關鍵字等訂閱條件。
-爬蟲透過 **proxynova.com 動態 proxy** 在 **Render Cron Job** 每天台灣凌晨 4 點自動執行，爬取台灣行政院人事行政總處事求人（`web3.dgpa.gov.tw`）的政府職缺（含詳細頁），
+爬蟲透過 **proxynova.com 動態 proxy** 在 **Railway Cron Job** 每天台灣凌晨 4 點自動執行，爬取台灣行政院人事行政總處事求人（`web3.dgpa.gov.tw`）的政府職缺（含詳細頁），
 儲存至 Neon PostgreSQL 的 `jobs` 資料表。查詢時直接從 DB 搜尋，速度快且資料完整。
 **無 LLM、無向量搜尋**，搜尋用 pg_trgm 模糊比對 + 多關鍵字 similarity 排序。
 
@@ -27,7 +27,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 
 # 正式爬蟲（含 proxy + 存 DB）
-python scripts/run_crawl.py --proxy                          # Render 用（透過 proxy）
+python scripts/run_crawl.py --proxy                          # Railway 用（透過 proxy）
 MAX_CRAWL_PAGES_SCHEDULED=1 python scripts/run_crawl.py --proxy  # 只爬 1 頁（測試）
 
 # 本機手動執行（直接連線，無 proxy）
@@ -64,7 +64,7 @@ curl http://localhost:8000/health
 ```
 前端 (LINE / Telegram)
     ↓ webhook
-FastAPI (Render)
+FastAPI (Railway)
     ├── /webhook            LINE 訊息 → line_service
     ├── /telegram-webhook   Telegram 訊息 → telegram_service（含簽章驗證）
     ├── /detail             職缺查詢網頁（RWD，篩選/排序/分頁）
@@ -75,8 +75,8 @@ FastAPI (Render)
     jobs 表（Neon PostgreSQL）
          ↓ 格式化 → 回覆
 
-爬蟲（Render Cron Job，每天台灣凌晨 4 點）
-    python scripts/run_crawl.py
+爬蟲（Railway Cron Job，每天台灣凌晨 4 點）
+    python scripts/run_crawl.py --proxy
     → proxy_manager（proxynova.com 抓台灣 proxy → 測試 → 選第一個可用）
     → scraper（proxy 連線，列表頁 + 詳細頁並行爬取）
     → jobs 表 UPSERT → delete_expired_jobs()
@@ -103,10 +103,10 @@ FastAPI (Render)
 
 ## 關鍵實作細節
 
-**Proxy 管理（`app/crawler/proxy_manager.py`）：** DGPA 僅允許台灣 IP，Render 美國 IP 需透過 proxy。
+**Proxy 管理（`app/crawler/proxy_manager.py`）：** DGPA 僅允許台灣 IP，Railway 美國 IP 需透過 proxy。
 - `get_working_proxy()` → 爬 proxynova.com 台灣 proxy 清單 → 依序測試 → 回傳第一個可用 dict
 - proxy 測試：GET DGPA 首頁，確認回應含 `__VIEWSTATE`（確認為真實 DGPA 頁面）
-- 無可用 proxy → 回傳 None → run_crawl.py exit(1)，Render log 可見
+- 無可用 proxy → 回傳 None → run_crawl.py exit(1)，Railway log 可見
 
 **爬蟲（`app/crawler/scraper.py`）：** ASP.NET WebForms，每次分頁帶 `__VIEWSTATE` POST。
 - `crawl_jobs(proxy_dict=None, ...)` → `_new_session(proxy_dict)` → 設定 `session.proxies`
@@ -152,7 +152,7 @@ Pillow 生成 2500×843 PNG（深藍底 + 5 個藍色按鈕），透過 api-data
 | 無 LLM | 使用者明確選擇不接付費 API |
 | 無向量搜尋（pgvector）| pg_trgm 對現有結構化訂閱條件已足夠 |
 | SQLite 不用 ORM | 結構簡單，直接 sqlite3 足夠 |
-| 爬蟲本機手動執行（非 Render） | Render free tier 資源受限，本機爬取更穩定 |
+| 爬蟲排程用 Railway Cron Job | Railway Hobby plan 支援 Cron Job；本機也可手動補跑 |
 | IS_OFFICE 寫死 True | 只爬公務人員任用資格職缺 |
 | 關鍵字不傳給爬蟲 | 只用於 DB 模糊比對，避免限制全量爬取 |
 | LINE Rich Menu（Pillow 生成） | 無需外部圖片服務，本機一次性執行即可 |
@@ -174,17 +174,19 @@ DATE_FROM / DATE_TO     民國年格式 YYYMMDD
 詳細頁 element ID：`PLTITLE`、`PLORG_NAME`、`PLRANK`、`PLSYSNAM`、
 `PLWORK_ITEM`、`PLWORK_QUALITY`、`PLWORK_ADDRESS`、`PLDATE_FROM_TO`
 
-## 部署（Render + Neon）
+## 部署（Railway + Neon）
 
-使用 `render.yaml`（兩個服務）：
-- **Web Service**：`uvicorn app.main:app`（LINE/Telegram webhook + /detail 頁面）
-- **Cron Job**（`gov-job-crawler`）：`python scripts/run_crawl.py`，每天 20:00 UTC（台灣凌晨 4 點）
+使用 `railway.toml` + Railway Dashboard 兩個服務：
 
-**Web Service 必要環境變數（Render Dashboard 手動設定）：**
-`LINE_CHANNEL_ACCESS_TOKEN`、`LINE_CHANNEL_SECRET`、`DATABASE_URL`（Neon）
+**Web Service（`railway.toml` 自動設定）：**
+- Build：NIXPACKS，Start：`uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- Railway Dashboard → Web Service → 必要環境變數：
+  `LINE_CHANNEL_ACCESS_TOKEN`、`LINE_CHANNEL_SECRET`、`DATABASE_URL`（Neon）
+- 建議設定：`TELEGRAM_BOT_TOKEN`、`TELEGRAM_WEBHOOK_SECRET`（部署後自動 set_webhook）
+- `RAILWAY_PUBLIC_DOMAIN` 由 Railway 自動注入，不需手動設定
 
-**Cron Job 必要環境變數：**
-`DATABASE_URL`（同 Neon 連線字串，在 gov-job-crawler 服務單獨設定）
-
-**建議設定：**
-`TELEGRAM_BOT_TOKEN`、`TELEGRAM_WEBHOOK_SECRET`（隨機字串，部署後自動 set_webhook）
+**Cron Job（Railway Dashboard 手動新增）：**
+- Service type: Cron Job，Source: 同一個 GitHub repo
+- Start command: `python scripts/run_crawl.py --proxy`
+- Schedule: `0 20 * * *`（UTC 20:00 = 台灣凌晨 4 點）
+- 環境變數：`DATABASE_URL`（同 Neon 連線字串）、`MAX_CRAWL_PAGES_SCHEDULED=0`

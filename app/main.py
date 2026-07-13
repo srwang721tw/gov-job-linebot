@@ -4,7 +4,7 @@ Startup sequence (managed by the async ``lifespan`` context manager):
     1. Ensure the SQLite data directory exists (local-dev fallback).
     2. Call ``init_db()`` to create / migrate database tables.
     3. If ``TELEGRAM_BOT_TOKEN`` is set, initialise the Telegram bot and
-       register the webhook URL (auto-derived from ``RENDER_EXTERNAL_URL``
+       register the webhook URL (auto-derived from ``RAILWAY_PUBLIC_DOMAIN``
        when ``TELEGRAM_WEBHOOK_URL`` is not explicitly set).
 
 Shutdown: ``shutdown_telegram()`` is called if the Telegram bot is active.
@@ -44,9 +44,9 @@ async def lifespan(app: FastAPI):
 
         webhook_url = TELEGRAM_WEBHOOK_URL
         if not webhook_url:
-            render_url = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
-            if render_url:
-                webhook_url = f"{render_url}/telegram-webhook"
+            public_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
+            if public_domain:
+                webhook_url = f"https://{public_domain}/telegram-webhook"
 
         await init_telegram(webhook_url)
 

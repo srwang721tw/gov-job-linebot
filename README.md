@@ -7,7 +7,7 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pg__trgm-336791)
 ![LINE](https://img.shields.io/badge/LINE-Bot%20SDK%20v3-00C300)
 ![Telegram](https://img.shields.io/badge/Telegram-Bot%20v20-2CA5E0)
-![Render](https://img.shields.io/badge/Deployed-Render-46E3B7)
+![Railway](https://img.shields.io/badge/Deployed-Railway-0B0D0E)
 
 ---
 
@@ -27,7 +27,7 @@ The target site ([DGPA job board](https://web3.dgpa.gov.tw)) provides no public 
 | Transient failures on a live government site | `urllib3.util.retry.Retry(total=3, backoff_factor=2)` — exponential backoff on 429/5xx |
 | Date format is ROC calendar (民國年) | Custom parser converts `115/06/03` → `2026-06-03` (ISO 8601) |
 
-**Scale:** ~2,900 job postings per full run; ~120 detail pages fetched concurrently; scheduled daily at 04:00 Taiwan time via Render Cron Job.
+**Scale:** ~2,900 job postings per full run; ~120 detail pages fetched concurrently; scheduled daily at 04:00 Taiwan time via Railway Cron Job.
 
 ---
 
@@ -62,7 +62,7 @@ Designed a single 6-step guided subscription flow and implemented it on both LIN
 User (LINE / Telegram)
        │ webhook (signature validated)
        ▼
-  FastAPI — Render Web Service
+  FastAPI — Railway Web Service
   ├── POST /webhook            LINE messages  → line_service
   ├── POST /telegram-webhook   Telegram msgs  → telegram_service
   ├── GET  /detail             RWD job search page (filter / sort / paginate)
@@ -72,7 +72,7 @@ User (LINE / Telegram)
                 │ SQL + pg_trgm similarity scoring
           jobs table (Neon PostgreSQL)
 
-Render Cron Job — daily 04:00 Taiwan (UTC 20:00)
+Railway Cron Job — daily 04:00 Taiwan (UTC 20:00)
   python scripts/run_crawl.py --proxy
   ├── proxy_manager   scrape proxynova.com → validate → pick first working proxy
   ├── scraper         VIEWSTATE POST pagination + 8-worker concurrent detail fetch
@@ -93,7 +93,7 @@ Render Cron Job — daily 04:00 Taiwan (UTC 20:00)
 | Telegram Bot | `python-telegram-bot` v20 · InlineKeyboard · Webhook |
 | Web Scraper | `requests` · `BeautifulSoup4` / `lxml` · `ThreadPoolExecutor` |
 | Proxy Management | `proxynova.com` scraping · VIEWSTATE-based proxy validation |
-| Deployment | Render (Web Service + Cron Job) · `render.yaml` Blueprint |
+| Deployment | Railway (Web Service + Cron Job) · `railway.toml` |
 | Logging | `loguru` (structured, colorized, ISO timestamps) |
 
 ---
@@ -195,15 +195,15 @@ LINE Rich Menu (5 buttons) is configured once via `python scripts/setup_line_men
 
 ## Crawler Usage
 
-### Automated (Render Cron Job)
+### Automated (Railway Cron Job)
 
-Runs daily at **04:00 Taiwan time** (UTC 20:00) via `render.yaml`:
+Runs daily at **04:00 Taiwan time** (UTC 20:00) via Railway Dashboard Cron Job:
 
 ```
 python scripts/run_crawl.py --proxy
 ```
 
-View logs: Render Dashboard → `gov-job-crawler` → Logs.
+View logs: Railway Dashboard → Cron Job service → Deployments.
 
 ### Manual Run (local machine, direct connection)
 
@@ -221,38 +221,43 @@ MAX_CRAWL_PAGES=1 python scripts/test_crawl.py
 
 ---
 
-## Deployment (Render + Neon)
+## Deployment (Railway + Neon)
 
 ### 1. Create Neon PostgreSQL
 
 Sign up at [neon.tech](https://neon.tech) → Create Project → copy the connection string (`postgresql://...?sslmode=require`).
 
-### 2. Deploy Web Service to Render
+### 2. Deploy Web Service to Railway
 
-New → **Web Service** → connect GitHub repo.
+New Project → **Deploy from GitHub repo** → select this repo. Railway auto-detects `railway.toml`.
+
+Set environment variables in Railway Dashboard:
+
+| Variable | Value |
+|---|---|
+| `LINE_CHANNEL_ACCESS_TOKEN` | From LINE Developers Console |
+| `LINE_CHANNEL_SECRET` | From LINE Developers Console |
+| `DATABASE_URL` | Neon connection string |
+| `TELEGRAM_BOT_TOKEN` | From [@BotFather](https://t.me/BotFather) |
+| `TELEGRAM_WEBHOOK_SECRET` | Any random string |
+
+`RAILWAY_PUBLIC_DOMAIN` is injected automatically — no need to set it.
+
+### 3. Create Cron Job (same repo)
+
+Railway Dashboard → **New Service** → **GitHub Repo** (same repo) → configure:
 
 | Field | Value |
 |---|---|
-| Build Command | `pip install -r requirements.txt` |
-| Start Command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
-| Health Check | `/health` |
-
-Set environment variables: `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_CHANNEL_SECRET`, `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`.
-
-### 3. Create Cron Job (gov-job-crawler)
-
-New → **Cron Job** → same repo.
-
-| Field | Value |
-|---|---|
-| Schedule | `0 20 * * *` (04:00 Taiwan = UTC 20:00) |
-| Command | `python scripts/run_crawl.py --proxy` |
-
-Set environment variable: `DATABASE_URL` (same Neon connection string).
+| Service type | Cron Job |
+| Start command | `python scripts/run_crawl.py --proxy` |
+| Schedule | `0 20 * * *` (UTC 20:00 = Taiwan 04:00) |
+| `DATABASE_URL` | Same Neon connection string |
+| `MAX_CRAWL_PAGES_SCHEDULED` | `0` (crawl all pages) |
 
 ### 4. Configure LINE Webhook
 
-LINE Developers Console → Messaging API → Webhook URL: `https://<render-url>/webhook` → Verify → enable **Use webhook**.
+LINE Developers Console → Messaging API → Webhook URL: `https://<railway-domain>/webhook` → Verify → enable **Use webhook**.
 
 ### 5. Telegram Webhook (auto-configured)
 
