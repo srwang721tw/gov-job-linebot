@@ -257,7 +257,7 @@ Railway Dashboard → **New Service** → **GitHub Repo** (same repo) → config
 
 ### 4. Configure LINE Webhook
 
-LINE Developers Console → Messaging API → Webhook URL: `https://<railway-domain>/webhook` → Verify → enable **Use webhook**.
+LINE Developers Console → Messaging API → Webhook URL: `https://gov-job-bot.up.railway.app/webhook` → Verify → enable **Use webhook**.
 
 ### 5. Telegram Webhook (auto-configured)
 

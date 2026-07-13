@@ -5,7 +5,7 @@ otherwise it falls back to a local SQLite file at ``SQLITE_PATH``.
 All other settings have sensible defaults for local development.
 
 On Railway, ``RAILWAY_PUBLIC_DOMAIN`` is injected automatically (e.g.
-``gov-job-linebot.up.railway.app``).  Set ``APP_BASE_URL`` to override
+``gov-job-bot.up.railway.app``).  Set ``APP_BASE_URL`` to override
 for other hosting platforms or local tunnels (e.g. ngrok).
 """
 import os
@@ -44,7 +44,7 @@ MAX_CRAWL_PAGES_SCHEDULED = int(os.getenv("MAX_CRAWL_PAGES_SCHEDULED", "0"))
 TOP_K_RESULTS = int(os.getenv("TOP_K_RESULTS", "10"))
 
 # 職缺詳細頁 URL
-# Railway 自動提供 RAILWAY_PUBLIC_DOMAIN（e.g. "gov-job-linebot.up.railway.app"）
+# Railway 自動提供 RAILWAY_PUBLIC_DOMAIN（e.g. "gov-job-bot.up.railway.app"）
 # 也可手動設定 APP_BASE_URL 覆蓋（含 scheme，e.g. "https://custom.domain.com"）
 _public_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
 _base_url = (f"https://{_public_domain}" if _public_domain
