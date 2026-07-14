@@ -1,0 +1,44 @@
+name: Test DGPA Connectivity
+
+on:
+  workflow_dispatch:   # 手動觸發
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install requests
+        run: pip install requests
+
+      - name: Test DGPA connectivity
+        run: |
+          python - <<'EOF'
+          import requests
+
+          URL = "https://web3.dgpa.gov.tw/want03front/AP/WANTF00001.ASPX"
+          HEADERS = {
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+              "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+              "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+          }
+
+          print(f"Testing: {URL}")
+          try:
+              r = requests.get(URL, headers=HEADERS, timeout=(10, 30))
+              print(f"HTTP status: {r.status_code}")
+              print(f"Content-Type: {r.headers.get('Content-Type', 'N/A')}")
+              print(f"Response size: {len(r.content)} bytes")
+
+              if "__VIEWSTATE" in r.text:
+                  print("✅ SUCCESS: __VIEWSTATE found — GitHub Actions can reach DGPA directly!")
+              else:
+                  print("❌ FAIL: __VIEWSTATE not found")
+                  print(f"Response preview (first 500 chars):\n{r.text[:500]}")
+
+          except requests.exceptions.ConnectionError as e:
+              print(f"❌ CONNECTION ERROR: {e}")
+          except requests.exceptions.Timeout as e:
+              print(f"❌ TIMEOUT: {e}")
+          except Exception as e:
+              print(f"❌ ERROR: {type(e).__name__}: {e}")
+          EOF
