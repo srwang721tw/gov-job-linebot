@@ -11,12 +11,10 @@ Typical usage:
 """
 import re
 import time
-import logging
 
 import requests
 from bs4 import BeautifulSoup
-
-log = logging.getLogger(__name__)
+from loguru import logger as log
 
 _PROXYNOVA_URL = "https://www.proxynova.com/proxy-server-list/country-tw/"
 _TEST_URL = "https://web3.dgpa.gov.tw/want03front/AP/WANTF00001.ASPX"
