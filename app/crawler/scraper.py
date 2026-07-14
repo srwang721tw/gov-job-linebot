@@ -21,7 +21,7 @@ Key design decisions:
 import re
 import socket
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as _FutureTimeoutError
 from datetime import datetime, timezone, timedelta
 from typing import List
 from urllib.parse import urljoin
@@ -44,7 +44,9 @@ from app.utils.config import (
     MAX_CRAWL_PAGES,
 )
 
-_DETAIL_WORKERS = 8   # 並行抓詳細頁的 thread 數
+_DETAIL_WORKERS       = 8     # 並行抓詳細頁的 thread 數
+_DETAIL_PER_TIMEOUT   = 45    # seconds — per-future timeout for each detail page
+_DETAIL_TOTAL_TIMEOUT = 3600  # seconds — hard cap for the entire detail-fetch phase
 from app.utils.logger import logger
 
 # ── 強制 IPv4（解決 Render 等主機 IPv6 路由不通的問題）────────────────────────
@@ -448,7 +450,7 @@ def fetch_job_detail(session: requests.Session | None, url: str) -> dict:
     if not url:
         return {}
     try:
-        r = session.get(url, headers=HEADERS, timeout=30)
+        r = session.get(url, headers=HEADERS, timeout=(10, 30))
         r.raise_for_status()
         r.encoding = "utf-8"
         soup = BeautifulSoup(r.text, "lxml")
@@ -647,7 +649,7 @@ def crawl_jobs(
     )
 
     # Step 1：GET 初始頁取得 VIEWSTATE
-    r = session.get(LIST_URL, headers=HEADERS, timeout=30)
+    r = session.get(LIST_URL, headers=HEADERS, timeout=(10, 30))
     r.encoding = "utf-8"
     soup = BeautifulSoup(r.text, "lxml")
 
@@ -660,7 +662,7 @@ def crawl_jobs(
         chk_types=chk_types, is_office=is_office,
         title_keyword=title_keyword, org_keyword=org_keyword,
     )
-    r = session.post(LIST_URL, data=payload, headers=HEADERS, timeout=30)
+    r = session.post(LIST_URL, data=payload, headers=HEADERS, timeout=(10, 30))
     r.encoding = "utf-8"
     result_soup = BeautifulSoup(r.text, "lxml")
 
@@ -693,7 +695,7 @@ def crawl_jobs(
             title_keyword=title_keyword, org_keyword=org_keyword,
             event_target="ctl00$ContentPlaceHolder1$btnNEXT",
         )
-        r = session.post(LIST_URL, data=payload, headers=HEADERS, timeout=30)
+        r = session.post(LIST_URL, data=payload, headers=HEADERS, timeout=(10, 30))
         r.encoding = "utf-8"
         result_soup = BeautifulSoup(r.text, "lxml")
         page += 1
@@ -709,11 +711,23 @@ def crawl_jobs(
         with ThreadPoolExecutor(max_workers=_DETAIL_WORKERS) as pool:
             future_to_id = {pool.submit(fetch_job_detail, session, url): jid
                             for jid, url in urls}
-            for future in as_completed(future_to_id):
-                detail_map[future_to_id[future]] = future.result() or {}
-                done += 1
-                if done % 100 == 0:
-                    logger.info(f"詳細頁進度：{done}/{len(urls)}")
+            try:
+                for future in as_completed(future_to_id, timeout=_DETAIL_TOTAL_TIMEOUT):
+                    jid = future_to_id[future]
+                    try:
+                        detail_map[jid] = future.result(timeout=_DETAIL_PER_TIMEOUT) or {}
+                    except Exception as e:
+                        logger.warning(f"詳細頁失敗 ({jid}): {e}")
+                    done += 1
+                    if done % 100 == 0:
+                        logger.info(f"詳細頁進度：{done}/{len(urls)}")
+            except _FutureTimeoutError:
+                logger.warning(
+                    f"詳細頁整體 timeout（{_DETAIL_TOTAL_TIMEOUT}s），"
+                    f"已完成 {done}/{len(urls)} 筆，繼續以現有資料建立 Job"
+                )
+                for f in future_to_id:
+                    f.cancel()
         logger.info(f"詳細頁抓取完成：{len(detail_map)} 筆")
 
         for raw in all_raw:

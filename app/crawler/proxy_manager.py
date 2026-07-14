@@ -10,6 +10,7 @@ Typical usage:
         session.proxies.update(proxy_dict)
 """
 import re
+import time
 import logging
 
 import requests
@@ -60,16 +61,20 @@ def _scrape_proxynova() -> list[str]:
     return proxies
 
 
-def _test_proxy(proxy_str: str, timeout: int = 15) -> bool:
+def _test_proxy(proxy_str: str, read_timeout: int = 15) -> bool:
     """Test whether a proxy can reach the DGPA job board.
 
     Validates by checking for ``__VIEWSTATE`` in the response body,
     which confirms the proxy returned the real ASP.NET page rather
     than its own error or redirect page.
 
+    Uses a tuple timeout ``(5, read_timeout)`` so a slow proxy that
+    cannot establish a TCP connection is abandoned within 5 seconds
+    rather than waiting the full read timeout.
+
     Args:
         proxy_str: Proxy address in ``"IP:PORT"`` format.
-        timeout: Request timeout in seconds. Defaults to 15.
+        read_timeout: Read timeout in seconds. Defaults to 15.
 
     Returns:
         True if the DGPA page was successfully retrieved through this
@@ -77,29 +82,37 @@ def _test_proxy(proxy_str: str, timeout: int = 15) -> bool:
     """
     proxy_dict = {"http": f"http://{proxy_str}", "https": f"http://{proxy_str}"}
     try:
-        r = requests.get(_TEST_URL, proxies=proxy_dict, timeout=timeout)
+        r = requests.get(_TEST_URL, proxies=proxy_dict, timeout=(5, read_timeout))
         return "__VIEWSTATE" in r.text
     except Exception:
         return False
 
 
-def get_working_proxy() -> dict | None:
+def get_working_proxy(max_seconds: int = 300) -> dict | None:
     """Return the first validated Taiwan proxy as a requests proxy dict.
 
     Fetches the current proxy list from proxynova.com and tests each
     entry sequentially against the DGPA site.  Returns as soon as a
-    working proxy is found.
+    working proxy is found, or ``None`` if the time budget is exhausted.
+
+    Args:
+        max_seconds: Maximum total seconds to spend testing proxies.
+            Defaults to 300 (5 minutes).
 
     Returns:
         A ``requests``-compatible proxy dict, e.g.::
 
             {"http": "http://1.2.3.4:8080", "https": "http://1.2.3.4:8080"}
 
-        Returns ``None`` if no working proxy is found.
+        Returns ``None`` if no working proxy is found within ``max_seconds``.
     """
     proxies = _scrape_proxynova()
-    log.info(f"Found {len(proxies)} Taiwan proxies, testing...")
+    log.info(f"Found {len(proxies)} Taiwan proxies, testing (budget: {max_seconds}s)...")
+    deadline = time.time() + max_seconds
     for p in proxies:
+        if time.time() > deadline:
+            log.error(f"Proxy testing exceeded {max_seconds}s budget, giving up")
+            return None
         log.info(f"Testing {p}...")
         if _test_proxy(p):
             log.info(f"Proxy working: {p}")
